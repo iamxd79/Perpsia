@@ -874,6 +874,33 @@ startScheduler({
 });
 
 // ==========================================
+// RENDER HEALTH SERVER
+// ==========================================
+
+const http = require("http");
+
+const PORT = process.env.PORT || 3000;
+
+http
+  .createServer((req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+    });
+
+    res.end(
+      JSON.stringify({
+        status: "online",
+        service: "Perpsia Terminal",
+      })
+    );
+  })
+  .listen(PORT, () => {
+    console.log(
+      `Perpsia health server listening on port ${PORT}`
+    );
+  });
+
+// ==========================================
 // STARTUP
 // ==========================================
 
