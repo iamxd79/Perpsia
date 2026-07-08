@@ -1,0 +1,22 @@
+{
+  "name": "perpsia-terminal",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "description": "",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "axios": "^1.18.1",
+    "better-sqlite3": "^12.11.1",
+    "dotenv": "^17.4.2",
+    "node-cron": "^4.6.0",
+    "node-telegram-bot-api": "^1.1.2",
+    "openai": "^6.45.0"
+  }
+}
