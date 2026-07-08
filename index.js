@@ -73,9 +73,17 @@ if (!token) {
 // TELEGRAM BOT
 // ==========================================
 
-const bot = new TelegramBot(token, {
-  polling: true,
-});
+const bot = new TelegramBot(
+  process.env.TELEGRAM_BOT_TOKEN,
+  {
+    polling: {
+      autoStart: true,
+      params: {
+        timeout: 30,
+      },
+    },
+  }
+);
 
 // ==========================================
 // GLOBAL LOCKS
