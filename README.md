@@ -1,246 +1,366 @@
-# Perpsia Terminal
+# Perpsia V1
 
-Perpsia is an autonomous perpetual futures market intelligence agent powered by CoinMarketCap Skill Hub and an AI reasoning layer.
+Perpsia V1 is an auditable perpetual-futures research and setup-ranking
+terminal.
 
-It scans perpetual futures markets, analyzes assets, tracks opportunity lifecycle, detects signal decay, challenges setups with counter-thesis logic, applies personalized risk settings, and sends Telegram alerts when meaningful market changes appear.
+The product combines:
 
-## Features
+- a database-backed setup terminal;
+- constrained lifecycle tracking;
+- Telegram alerts;
+- scheduled background services;
+- a live CoinMarketCap Skill Hub MCP bridge;
+- evidence validation before provider output can be used by Perpsia.
 
-- Telegram bot interface
-- Natural language interaction
-- CoinMarketCap Skill Hub market scans
-- Single asset deep analysis
-- Long / short / watchlist / neutral classification
-- Memory engine with SQLite
-- Opportunity lifecycle tracking
-- Signal decay detection
-- Counter-thesis engine
-- Personalized risk engine
-- Smart report composer
-- OpenAI reasoning layer
-- Autonomous 4h scheduler
-- Smart alerts
-- Shared scan lock
-- Basic API rate limiting and anti-spam protection
+Live provider output is treated as research evidence. It cannot directly create
+entries, stop-losses, targets, scores, lifecycle states, or trade outcomes.
 
-## Commands
+## Current status
+
+As of July 10, 2026, the following live CMC Skill Hub flow has been verified:
 
 ```text
-/start
-/help
-/scan
-/analyze BTC
-/analyze $BTC
-/analyze BTC Binance
-/risk 500 1 5
-/status
-/chatid
+Perpsia worker
+  -> MCP bridge
+  -> CMC Skill Hub
+  -> find_skill
+  -> execute_skill
+  -> altcoin_scanner_perp / perp_contract_analysis
+  -> Perpsia evidence validation
+  -> structured research output
 ```
 
-## Natural Language Examples
+The verified live health check returns:
 
-```text
-Analyze BTC
-Analyze $BTC
-BTC
-$ETH
-Scan the market
-Find futures opportunities
-I have $500, risk 1%, max leverage 5x
-Check Perpsia status
+```json
+{
+  "live": true,
+  "persistence": "NO_SNAPSHOT_WRITE",
+  "status": "HEALTHY",
+  "tools": [
+    "find_skill",
+    "execute_skill"
+  ],
+  "skills": {
+    "discovery": "altcoin_scanner_perp",
+    "analysis": "perp_contract_analysis"
+  }
+}
 ```
 
-## Environment Variables
-
-Create a `.env` file at the root of the project and add the required environment variables.
-
-```env
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
-OPENAI_API_KEY=
-```
-
-Add any additional CoinMarketCap Skill Hub or MCP credentials required by `cmcClient.js`.
-
-Never commit the `.env` file.
-
-## Installation
-
-Install the project dependencies:
+A live, no-write discovery run has also been verified with:
 
 ```bash
-npm install
+npm run worker -- cmc discover --dry-run --live
 ```
 
-## Run Locally
+The response included:
 
-Start Perpsia:
+- a successful validation result;
+- `rawSkillId: altcoin_scanner_perp`;
+- a CoinMarketCap-branded decision report;
+- a ranked perpetual-altcoin research queue;
+- provider-envelope admission and field-renaming metadata.
+
+This confirms that Perpsia is executing a real CMC Skill Hub skill rather than
+reading a local fixture.
+
+## Product boundaries
+
+Perpsia V1 separates provider evidence from Perpsia-owned trade logic.
+
+```text
+External provider
+  -> raw response
+  -> admission mapping
+  -> evidence validation
+  -> normalized evidence
+
+Normalized evidence
+  -> Perpsia-owned signal engine
+  -> setup interpretation
+  -> scoring
+  -> lifecycle
+  -> alerts
+```
+
+The Perpsia-owned signal engine remains disabled for live provider evidence
+until its deterministic trade interpretation is implemented and approved.
+
+Therefore:
+
+- CMC output can support research;
+- CMC output cannot directly create a trade setup;
+- provider confidence is stored only as provider context;
+- provider action guidance is removed from admitted evidence;
+- the live CMC path is safe by default and uses no-write mode unless an explicit
+  persistence mode is selected.
+
+## Stack
+
+- Next.js 16
+- React 19
+- TypeScript
+- Supabase PostgreSQL
+- Supabase JavaScript client with server-side service-role access
+- Telegram Bot API
+- Vercel Cron
+- Render runtime for the deployed Telegram service
+- CMC Skill Hub through a Streamable HTTP MCP bridge
+- Zod-based validation
+
+## Repository architecture
+
+```text
+app/
+  Next.js routes and database-backed product pages
+
+lib/cmc/
+  CMC Skill Hub adapter, transport, schemas, validation, and normalization
+
+lib/worker/
+  ingestion execution, repositories, retries, leases, and audit logic
+
+lib/signal-engine/
+  Perpsia-owned interpretation boundary
+
+scripts/perpsia-worker.ts
+  CLI entry point for live CMC, fixture, replay, database, and provider commands
+
+bridges/
+  local MCP bridge adapters
+
+supabase/
+  PostgreSQL migrations and database configuration
+```
+
+## Live CMC Skill Hub commands
+
+### Health check
 
 ```bash
-node index.js
+npm run worker -- cmc health --live
 ```
 
-## Syntax Check
+This verifies:
 
-Before deployment, check the main project files:
+- the MCP transport;
+- the availability of `find_skill`;
+- the availability of `execute_skill`;
+- the discovery skill `altcoin_scanner_perp`;
+- the analysis skill `perp_contract_analysis`.
+
+### Market discovery
 
 ```bash
-node --check index.js
-node --check services/scanner.js
-node --check services/memory.js
-node --check services/scheduler.js
-node --check services/openaiReasoning.js
-node --check services/intentRouter.js
-node --check services/alertEngine.js
-node --check services/riskEngine.js
-node --check services/lifecycle.js
-node --check services/decay.js
-node --check services/counterThesis.js
-node --check services/reportComposer.js
-node --check services/rateLimit.js
-node --check services/scanLock.js
+npm run worker -- cmc discover --dry-run --live
 ```
 
-## Security
+This executes the live discovery skill and validates the returned research
+evidence without writing snapshots to Supabase.
 
-The following files and directories should never be committed:
+### Single-asset analysis
+
+SOL example:
+
+```bash
+npm run worker -- cmc analyze --cmcid 5426 --dry-run --live
+```
+
+The worker uses `perp_contract_analysis` for the requested asset.
+
+### Batch flow
+
+```bash
+npm run worker -- cmc run --max-candidates 10 --dry-run --live
+```
+
+### Database verification
+
+```bash
+npm run worker -- cmc verify-db
+```
+
+This requires the ingestion migrations and valid Supabase service-role
+configuration.
+
+## CMC evidence admission
+
+The live provider envelope passes through a versioned admission layer.
+
+Current behavior includes:
+
+- renaming provider `confidence` to `provider_analysis_confidence`;
+- removing provider action guidance;
+- retaining provenance and source timestamps;
+- preserving the raw skill identifier for auditability;
+- rejecting forbidden trade-authority fields;
+- validating admitted evidence before normalization.
+
+CMC Skill Hub remains an evidence source, not Perpsia's signal authority.
+
+## Ingestion worker
+
+The provider-neutral worker foundation includes:
+
+- atomic worker leases;
+- ingestion run tracking;
+- idempotent source requests;
+- raw source artifact retention;
+- validation-failure persistence;
+- source-health persistence;
+- deterministic idempotency hashing;
+- bounded retries;
+- secret redaction;
+- no-write and audit-write dry-run policies;
+- fixture replay;
+- raw-artifact replay.
+
+The worker repository boundary exposes ingestion and provider-evidence
+operations only. It does not expose setup, score, transition, or outcome
+writers.
+
+### General worker examples
+
+```bash
+npm run worker -- fixture tests/fixtures/cmc-perp-evidence.json
+npm run worker -- fixture tests/fixtures/cmc-perp-evidence.json audit-write
+npm run worker -- validate tests/fixtures/cmc-perp-evidence.json
+npm run worker -- health
+```
+
+Fixture and replay commands are no-write by default.
+
+Use:
+
+- `--dry-run` or the default mode for no writes;
+- `audit-write` to persist audit records only;
+- `commit` only where snapshot persistence is explicitly supported.
+
+## Local setup
+
+1. Copy `.env.example` to `.env.local`.
+
+2. Configure the required environment variables:
+
+   ```text
+   SUPABASE_URL
+   SUPABASE_SERVICE_ROLE_KEY
+   TELEGRAM_BOT_TOKEN
+   CRON_SECRET
+   SETTINGS_WRITE_SECRET
+   ```
+
+3. Apply the database migrations:
+
+   ```bash
+   npm run db:push
+   ```
+
+   For a local Supabase stack:
+
+   ```bash
+   npm run db:start
+   npm run db:reset
+   ```
+
+4. Optionally insert clearly labeled development records:
+
+   ```bash
+   npm run db:seed
+   ```
+
+5. Start the application:
+
+   ```bash
+   npm run dev
+   ```
+
+Without valid Supabase configuration, the product deliberately shows a
+connection setup state. It does not substitute hardcoded production data.
+
+## Development-data warning
+
+The seed script creates demonstration assets, snapshots, setups, evidence,
+transitions, and outcomes.
+
+All seeded records are marked as development data.
+
+Seeded values must not be presented as live CMC output or live trading
+performance.
+
+## Scheduled jobs
+
+`vercel.json` configures:
+
+- `/api/cron/scan` every 15 minutes;
+- `/api/cron/alerts` every 5 minutes.
+
+Both require:
 
 ```text
-node_modules
-.env
-perpsia.db
-*.db
-*.sqlite
+Authorization: Bearer <CRON_SECRET>
 ```
 
-Recommended `.gitignore`:
+The scheduled scanner acts as an orchestrator:
 
-```gitignore
-node_modules
-.env
-perpsia.db
-*.db
-*.sqlite
+1. Live provider evidence is kept separate from setup authority.
+2. Provider evidence cannot create setups directly.
+3. Existing Perpsia setups can be evaluated against persisted authoritative
+   price snapshots.
+4. Legal lifecycle transitions are applied through an atomic PostgreSQL
+   function.
+5. PostgreSQL creates alert-queue rows only after allowed transitions are
+   persisted.
+
+The alert worker never invents transitions.
+
+## Telegram
+
+Set `TELEGRAM_BOT_TOKEN`, configure an authorized Telegram chat or subscription,
+and set `SETTINGS_WRITE_SECRET` before enabling settings writes.
+
+The deployed Telegram service and scheduler can run independently from the CMC
+worker. A complete user-request-to-CMC-to-Telegram flow should only be claimed
+where the bot command is explicitly wired to the live worker.
+
+## Contest demonstration
+
+A transparent proof of the CMC integration should show:
+
+1. `npm run worker -- cmc health --live`
+2. `status: HEALTHY`
+3. `find_skill`
+4. `execute_skill`
+5. `altcoin_scanner_perp`
+6. `perp_contract_analysis`
+7. `npm run worker -- cmc discover --dry-run --live`
+8. `rawSkillId: altcoin_scanner_perp`
+9. the returned CoinMarketCap research output
+10. Perpsia's validation and admission metadata
+
+Recommended public description:
+
+> Perpsia connects to CoinMarketCap Skill Hub through a live MCP bridge. The
+> worker verifies the available CMC tools, executes the relevant research
+> skill, validates the returned evidence, and keeps provider output separate
+> from Perpsia-owned trade logic.
+
+## Documentation
+
+- [CMC Skill Hub ingestion contract](docs/CMC_SKILL_HUB_INGESTION.md)
+- [Phase 2A worker configuration](docs/CMC_WORKER_PHASE2A.md)
+- [Phase 2B live MCP bridge](docs/CMC_WORKER_PHASE2B.md)
+- [Phase 2C envelope admission](docs/CMC_WORKER_PHASE2C.md)
+- [Phase 2D persistence and replay](docs/CMC_WORKER_PHASE2D.md)
+- [Phase 2E evidence extraction](docs/CMC_WORKER_PHASE2E.md)
+
+## Verification
+
+```bash
+npm run typecheck
+npm run build
 ```
 
-## Architecture
-
-```text
-Telegram User
-      ↓
-Natural Language Router
-      ↓
-Perpsia Engine
-      ↓
-CoinMarketCap Skill Hub
-      ↓
-Market Classification
-      ↓
-Memory Engine
-      ↓
-Lifecycle Tracking
-      ↓
-Signal Decay
-      ↓
-Counter-Thesis Engine
-      ↓
-Personalized Risk Engine
-      ↓
-OpenAI Reasoning Layer
-      ↓
-Telegram Reports + Smart Alerts
-```
-
-## Intelligence Flow
-
-Perpsia uses three distinct layers:
-
-```text
-CoinMarketCap Skill Hub
-=
-Market data and market intelligence
-
-Perpsia Engine
-=
-Scoring, classification and decision logic
-
-OpenAI
-=
-Reasoning, explanation, contradiction analysis and natural language
-```
-
-OpenAI does not independently create trading signals or make trading decisions.
-
-The final classification remains controlled by the Perpsia Engine and the market intelligence returned by CoinMarketCap Skill Hub.
-
-## Autonomous Market Scans
-
-Perpsia automatically scans the perpetual futures market every 4 hours.
-
-The autonomous system:
-
-```text
-Market Scan
-→ Candidate Discovery
-→ Deep Market Analysis
-→ Classification
-→ Memory Comparison
-→ Meaningful Change Detection
-→ Smart Alert
-```
-
-Alerts are only sent when meaningful market changes are detected.
-
-## Market Classification
-
-Perpsia classifies analyzed assets into four categories:
-
-```text
-LONG
-SHORT
-WATCHLIST
-NEUTRAL / AVOID
-```
-
-A setup must meet Perpsia's internal scoring and confirmation requirements before being classified as actionable.
-
-## Risk Management
-
-Users can configure a personal risk profile:
-
-```text
-/risk 500 1 5
-```
-
-Example:
-
-```text
-Capital: $500
-Risk per trade: 1%
-Maximum leverage: 5x
-```
-
-Perpsia uses these settings to calculate personalized risk information when an actionable setup is detected.
-
-## API Protection
-
-Perpsia includes basic cooldown protection to reduce API abuse and unnecessary CoinMarketCap Skill Hub and OpenAI usage.
-
-Direct asset symbols are handled locally before the OpenAI intent router when possible.
-
-Examples:
-
-```text
-BTC
-$BTC
-ETH
-$SOL
-```
-
-## Disclaimer
-
-Perpsia is a market intelligence and research tool.
-
-It does not guarantee profits, predict market outcomes with certainty, or replace independent research and risk management.
-
-Nothing generated by Perpsia should be considered financial advice.
+The seed command and persistence modes require a configured Supabase project.
+This repository does not contain credentials.
