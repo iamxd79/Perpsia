@@ -7,15 +7,28 @@
 
 
 
+
+
+
+
 const axios = require("axios");
 const crypto = require("crypto");
 const { openDatabase, getStorageInfo } = require("./database");
+const { initializeSignalQuality, recordQualitySignal, evaluateSignalOutcomes, getSignalQualityReport, getSignalQualityHealth } = require("./signalQualityStore");
+
+
 
 
 const db = openDatabase();
 
 
+
+
 db.pragma("journal_mode = WAL");
+
+
+
+
 
 
 
@@ -43,6 +56,11 @@ db.exec([
   "CREATE INDEX IF NOT EXISTS idx_performance_signal_time ON performance_signals(signal_time);",
   "CREATE INDEX IF NOT EXISTS idx_performance_signal_status ON performance_signals(status)",
 ].join(String.fromCharCode(10)));
+initializeSignalQuality(db);
+
+
+
+
 
 
 
@@ -50,6 +68,8 @@ db.exec([
 const DEFAULT_LOOKBACK_DAYS = 30;
 const MAX_LOOKBACK_DAYS = 365;
 const CANDLE_INTERVAL = "1h";
+
+
 
 
 function getDashboardUrl() {
@@ -63,10 +83,16 @@ function getDashboardUrl() {
 }
 
 
+
+
 function number(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
+
+
+
+
 
 
 
@@ -80,8 +106,16 @@ function normalizeSymbol(symbol) {
 
 
 
+
+
+
+
   return value.endsWith("USDT") ? value : value + "USDT";
 }
+
+
+
+
 
 
 
@@ -96,10 +130,18 @@ function normalizeDirection(direction) {
 
 
 
+
+
+
+
 function extractNumbers(value) {
   const matches = String(value || "").match(new RegExp("[-+]?[0-9]+(?:[.][0-9]+)?", "g")) || [];
   return matches.map(Number).filter(Number.isFinite);
 }
+
+
+
+
 
 
 
@@ -111,10 +153,18 @@ function resolveEntryPrice(entry, currentPrice) {
 
 
 
+
+
+
+
   const values = extractNumbers(entry).filter((item) => item > 0);
   const current = number(currentPrice);
   if (!values.length) return current;
   if (values.length === 1) return values[0];
+
+
+
+
 
 
 
@@ -129,10 +179,18 @@ function resolveEntryPrice(entry, currentPrice) {
 
 
 
+
+
+
+
 function round(value, digits = 6) {
   const parsed = number(value);
   return parsed === null ? null : Number(parsed.toFixed(digits));
 }
+
+
+
+
 
 
 
@@ -151,8 +209,16 @@ function makeSignalId(signal, observedAt) {
 
 
 
+
+
+
+
   return crypto.createHash("sha1").update(identity).digest("hex");
 }
+
+
+
+
 
 
 
@@ -166,10 +232,18 @@ function validLevels(direction, entry, stop, tp1) {
 
 
 
+
+
+
+
 function recordSignal(signal, source = "live") {
   if (!signal?.isActionable) {
     return { recorded: false, reason: "not_actionable" };
   }
+
+
+
+
 
 
 
@@ -183,6 +257,10 @@ function recordSignal(signal, source = "live") {
 
 
 
+
+
+
+
   if (
     !direction ||
     entry === null ||
@@ -192,6 +270,10 @@ function recordSignal(signal, source = "live") {
   ) {
     return { recorded: false, reason: "invalid_trade_levels" };
   }
+
+
+
+
 
 
 
@@ -219,12 +301,28 @@ function recordSignal(signal, source = "live") {
 
 
 
+
+
+
+
+  const quality = recordQualitySignal(signal, {
+    performanceSignalId: id,
+    source,
+    signalTime: observedAt,
+    id,
+  });
+
   return {
     recorded: result.changes > 0,
     id,
     status: "OPEN",
+    quality,
   };
 }
+
+
+
+
 
 
 
@@ -240,11 +338,19 @@ function getOpenSignals(cutoffTime) {
 
 
 
+
+
+
+
 function pnlPercent(direction, entry, exit) {
   return direction === "SHORT"
     ? ((entry - exit) / entry) * 100
     : ((exit - entry) / entry) * 100;
 }
+
+
+
+
 
 
 
@@ -260,6 +366,10 @@ function parseKlines(rows) {
     .filter((row) => [row.timestamp, row.high, row.low, row.close].every((value) => value !== null))
     .sort((a, b) => a.timestamp - b.timestamp);
 }
+
+
+
+
 
 
 
@@ -281,6 +391,10 @@ function findExit(candles, signal) {
 
 
 
+
+
+
+
     if (stopHit) {
       return { time: candle.timestamp, price: signal.stop_price, reason: "STOP_HIT", status: "LOST" };
     }
@@ -288,9 +402,17 @@ function findExit(candles, signal) {
 
 
 
+
+
+
+
     if (tp2Hit) {
       return { time: candle.timestamp, price: signal.tp2_price, reason: "TP2_HIT", status: "WON" };
     }
+
+
+
+
 
 
 
@@ -303,8 +425,16 @@ function findExit(candles, signal) {
 
 
 
+
+
+
+
   return null;
 }
+
+
+
+
 
 
 
@@ -314,6 +444,10 @@ async function fetchCandles(signal, options = {}) {
   const baseUrl = options.futuresBaseUrl ||
     process.env.PERFORMANCE_FUTURES_BASE_URL ||
     "https://fapi.binance.com";
+
+
+
+
 
 
 
@@ -332,8 +466,16 @@ async function fetchCandles(signal, options = {}) {
 
 
 
+
+
+
+
   return parseKlines(response.data);
 }
+
+
+
+
 
 
 
@@ -351,6 +493,10 @@ async function settleOpenSignals(options = {}) {
 
 
 
+
+
+
+
   for (const signal of openSignals.slice(0, 100)) {
     try {
       const candles = await fetchCandles(signal, options);
@@ -360,7 +506,15 @@ async function settleOpenSignals(options = {}) {
 
 
 
+
+
+
+
       if (!exit) continue;
+
+
+
+
 
 
 
@@ -387,6 +541,10 @@ async function settleOpenSignals(options = {}) {
 
 
 
+
+
+
+
   return {
     considered: openSignals.length,
     settled,
@@ -397,10 +555,18 @@ async function settleOpenSignals(options = {}) {
 
 
 
+
+
+
+
 function formatPercent(value, digits = 2) {
   const parsed = number(value) || 0;
   return parsed.toFixed(digits) + "%";
 }
+
+
+
+
 
 
 
@@ -422,11 +588,19 @@ function calculateStats(trades) {
 
 
 
+
+
+
+
   let equity = 1;
   let peak = 1;
   let maxDrawdown = 0;
   let consecutiveWins = 0;
   let maxConsecutiveWins = 0;
+
+
+
+
 
 
 
@@ -439,6 +613,10 @@ function calculateStats(trades) {
 
 
 
+
+
+
+
     if (trade.pnl_percent > 0) {
       consecutiveWins += 1;
       maxConsecutiveWins = Math.max(maxConsecutiveWins, consecutiveWins);
@@ -446,6 +624,10 @@ function calculateStats(trades) {
       consecutiveWins = 0;
     }
   }
+
+
+
+
 
 
 
@@ -470,6 +652,10 @@ function calculateStats(trades) {
 
 
 
+
+
+
+
 async function getPerformance(options = {}) {
   const requestedDays = Number(options.lookbackDays || DEFAULT_LOOKBACK_DAYS);
   const lookbackDays = Number.isFinite(requestedDays)
@@ -483,6 +669,10 @@ async function getPerformance(options = {}) {
 
 
 
+
+
+
+
   const signals = db.prepare([
     "SELECT * FROM performance_signals",
     "WHERE signal_time >= ?",
@@ -491,6 +681,10 @@ async function getPerformance(options = {}) {
   const closed = signals.filter((signal) => ["WON", "LOST"].includes(signal.status));
   const openSignals = signals.filter((signal) => signal.status === "OPEN");
   const stats = calculateStats(closed);
+
+
+
+
 
 
 
@@ -524,12 +718,20 @@ async function getPerformance(options = {}) {
 
 
 
+
+
+
+
 function getPerformanceRows(options = {}) {
   const requestedDays = Number(options.lookbackDays || DEFAULT_LOOKBACK_DAYS);
   const days = Number.isFinite(requestedDays)
     ? Math.min(Math.max(Math.floor(requestedDays), 1), MAX_LOOKBACK_DAYS)
     : DEFAULT_LOOKBACK_DAYS;
   const cutoffTime = Date.now() - days * 24 * 60 * 60 * 1000;
+
+
+
+
 
 
 
@@ -547,10 +749,17 @@ function getPerformanceRows(options = {}) {
 
 
 
+
+
+
+
 module.exports = {
   getPerformance,
   getPerformanceRows,
   recordSignal,
   settleOpenSignals,
+  evaluateSignalOutcomes,
+  getSignalQualityReport,
+  getSignalQualityHealth,
   getStorageInfo,
 };
