@@ -109,7 +109,7 @@ function buildCMCParams(symbol, venue = DEFAULT_VENUE, params = {}) {
 
   return {
     ...safeParams,
-    symbol: String(symbol).trim().replace(/^\\$/, "").toUpperCase(),
+    symbol: String(symbol).trim().replace("$", "").toUpperCase(),
     venue: config.name,
   };
 }
