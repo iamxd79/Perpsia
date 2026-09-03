@@ -239,28 +239,65 @@ function coerceSymbol(value) {
     );
   }
 
-  return normalizeSymbol(value);
+  const text = String(value || "").trim();
+  const separators = [" ", "(", ":", ","];
+  let end = text.length;
+
+  for (const separator of separators) {
+    const position = text.indexOf(separator);
+    if (position >= 0 && position < end) end = position;
+  }
+
+  return normalizeSymbol(text.slice(0, end));
+}
+
+function unwrapSkillData(payload) {
+  return (
+    payload?.result?.data?.data ||
+    payload?.result?.data ||
+    payload?.data ||
+    payload
+  );
+}
+
+function getDecisionReport(payload) {
+  const data = unwrapSkillData(payload);
+
+  return (
+    data?.decision_report ||
+    payload?.result?.data?.decision_report ||
+    payload?.decision_report ||
+    null
+  );
 }
 
 function getReportText(payload) {
   const report =
-    payload?.result?.data?.decision_report ||
-    payload?.decision_report ||
+    getDecisionReport(payload) ||
+    payload?.result?.data?.analysis ||
     payload?.analysis ||
     payload?.output ||
+    unwrapSkillData(payload) ||
     payload;
 
   if (report && typeof report === "object") {
-    return [
+    const parts = [
       stringifyReadable(report.conclusion),
       stringifyReadable(report.analysis),
-      stringifyReadable(report),
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+      stringifyReadable(report.action_guidance),
+    ].filter(Boolean);
+
+    return (parts.length ? parts : [stringifyReadable(report)]).join(
+      String.fromCharCode(10) + String.fromCharCode(10)
+    );
   }
 
   return String(report || "");
+}
+
+function getDecisionAnalysis(payload) {
+  const report = getDecisionReport(payload);
+  return typeof report?.analysis === "string" ? report.analysis : "";
 }
 
 function textIncludesAny(text, words) {
@@ -276,6 +313,47 @@ function cleanRead(text) {
     .replace(/spot CVD latest_delta.*$/i, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
+  const analysis = getDecisionAnalysis(scanPayload);
+  if (!analysis) return [];
+
+  const symbols = [];
+  let inPrimarySection = false;
+
+  for (const rawLine of analysis.split(String.fromCharCode(10))) {
+    const line = rawLine.replaceAll(String.fromCharCode(13), "").trim();
+    const lower = line.toLowerCase();
+
+    if (lower.includes("primary ranked candidates")) {
+      inPrimarySection = true;
+      continue;
+    }
+
+    if (inPrimarySection && line.startsWith("###")) {
+      inPrimarySection = false;
+      continue;
+    }
+
+    if (!inPrimarySection) continue;
+
+    const dot = line.indexOf(".");
+    if (dot <= 0 || !Number.isInteger(Number(line.slice(0, dot).trim()))) {
+      continue;
+    }
+
+    const markerStart = line.indexOf("**", dot + 1);
+    const markerEnd = markerStart < 0 ? -1 : line.indexOf("**", markerStart + 2);
+    if (markerStart < 0 || markerEnd < 0) continue;
+
+    const symbol = coerceSymbol(line.slice(markerStart + 2, markerEnd));
+    if (symbol && !blacklist.has(symbol)) {
+      symbols.push(symbol);
+    }
+  }
+
+  return symbols;
 }
 
 function extractSymbolsFromScan(scanPayload) {
@@ -338,6 +416,10 @@ function extractSymbolsFromScan(scanPayload) {
         symbols.push(symbol);
       }
     }
+  }
+
+  if (!symbols.length) {
+    symbols.push(...extractSymbolsFromDecisionReport(scanPayload, blacklist));
   }
 
   return [...new Set(symbols)].slice(0, MAX_SCAN_CANDIDATES);
