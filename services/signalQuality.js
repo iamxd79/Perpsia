@@ -48,14 +48,13 @@ function groupForProvider(provider, record = {}) {
   const normalized = normalizeProvider(provider);
   const known = PROVIDER_GROUPS[normalized];
   if (known && known.length) {
-    if (normalized === "coinmarketcap" || normalized === "cmc") {
-      const groups = [];
-      if (record.openInterest !== null && record.openInterest !== undefined || record.funding !== null && record.funding !== undefined) groups.push("DERIVATIVES");
-      if (record.spotPrice !== null && record.spotPrice !== undefined || record.marketType === "spot") groups.push("SPOT");
-      if (record.orderbook) groups.push("ORDERBOOK");
-      return groups.length ? groups : ["DERIVATIVES"];
-    }
-    return known.slice();
+    const marketType = String(record.marketType || "").toLowerCase();
+    const groups = [];
+    if (normalized === "coinmarketcap" || normalized === "cmc" || marketType.includes("perp") || marketType.includes("future") || record.openInterest !== null && record.openInterest !== undefined || record.funding !== null && record.funding !== undefined) groups.push("DERIVATIVES");
+    if (marketType.includes("spot") || record.spotPrice !== null && record.spotPrice !== undefined) groups.push("SPOT");
+    if (record.orderbook) groups.push("ORDERBOOK");
+    if (groups.length) return [...new Set(groups)];
+    return [known[0]];
   }
   const marketType = String(record.marketType || "").toLowerCase();
   if (marketType.includes("dex")) return ["DEX"];
@@ -116,15 +115,18 @@ function groupEvidence(signal = {}) {
     }
   }
 
-  if (signal.hasCoreData && signal.evidence && !Object.keys(grouped).length) {
-    grouped.DERIVATIVES = {
-      group: "DERIVATIVES",
-      providers: ["coinmarketcap"],
-      records: [],
-      fields: ["price", "openInterest", "funding", "priceChange"],
-      directions: [],
-      direction: normalizeDirection(signal.direction),
-    };
+  if (signal.hasCoreData && signal.evidence) {
+    if (!grouped.DERIVATIVES) {
+      grouped.DERIVATIVES = {
+        group: "DERIVATIVES",
+        providers: [],
+        records: [],
+        fields: ["price", "openInterest", "funding", "priceChange"],
+        directions: [],
+        direction: normalizeDirection(signal.direction),
+      };
+    }
+    if (!grouped.DERIVATIVES.providers.includes("coinmarketcap")) grouped.DERIVATIVES.providers.push("coinmarketcap");
   }
 
   const requestedDirection = normalizeDirection(signal.direction);
