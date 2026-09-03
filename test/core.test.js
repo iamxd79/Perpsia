@@ -64,10 +64,10 @@ test("retries transient failures with bounded attempts", async () => {
 test("circuit breaker opens after its failure threshold", async () => {
   const breaker = new CircuitBreaker(2, 60000);
   await assert.rejects(() => breaker.execute(async () => {
-    throw new Error("provider down");
+    throw new Error("provider timeout");
   }));
   await assert.rejects(() => breaker.execute(async () => {
-    throw new Error("provider down");
+    throw new Error("provider timeout");
   }));
   assert.equal(breaker.snapshot().state, "OPEN");
 });
