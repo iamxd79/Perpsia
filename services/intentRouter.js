@@ -1,4 +1,5 @@
 const OpenAI = require("openai");
+const { normalizeVenue } = require("./exchangeAdapter");
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -38,7 +39,9 @@ Rules:
 - If user asks what you can do, return help.
 - If user asks to analyze, check, review, scan, or inspect ONE asset, return analyze_asset.
 - Extract crypto/futures symbol in uppercase.
-- Default venue is Binance unless user mentions another venue.
+- Default venue is Binance unless the user mentions another supported venue.
+- Supported venues are Binance, Bybit, OKX, Dydx, and Hyperliquid.
+- Normalize venue aliases such as okex to OKX and dydxv4 to Dydx. Return the canonical name.
 - If user asks to scan the whole market or find opportunities, return scan_market.
 - If user gives capital/risk/leverage settings, return set_risk.
 - If unclear, return unknown.
@@ -64,7 +67,17 @@ JSON schema:
   });
 
   try {
-    return JSON.parse(response.output_text);
+    const route = JSON.parse(response.output_text);
+
+    if (route.venue) {
+      try {
+        route.venue = normalizeVenue(route.venue);
+      } catch {
+        route.venue = "Binance";
+      }
+    }
+
+    return route;
   } catch {
     return {
       intent: "unknown",
