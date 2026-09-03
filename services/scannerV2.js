@@ -268,16 +268,6 @@ function textIncludesAny(text, words) {
   return words.some((word) => text.toLowerCase().includes(word.toLowerCase()));
 }
 
-function parseNumber(text, regex) {
-  if (!text) return null;
-
-  const match = text.match(regex);
-  if (!match) return null;
-
-  const value = Number(match[1]);
-  return Number.isFinite(value) ? value : null;
-}
-
 function cleanRead(text) {
   if (!text) return "No clean market summary returned.";
 
@@ -426,7 +416,6 @@ ${mtfText}
 
   console.log("Parsed fields:", { price, funding, priceChange, oiChange, upside, downside });
 
-  console.log("Parsed fields:", { price, funding, priceChange, oiChange, upside, downside });
 
   const hasCoreData =
     price !== null &&
