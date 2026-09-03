@@ -7,6 +7,7 @@ const { executeSkill } = require("./cmcClient");
 const { buildCMCParams, buildPerpAnalysisParams, normalizeVenue } = require("./exchangeAdapter");
 const { analyzeDivergence } = require("./divergence");
 const { checkWhaleActivity } = require("./whaleAlerts");
+const { analyzeCorrelation } = require("./correlation");
 const { RequestQueue } = require("./queue");
 
 const ACTIVE_SIGNAL_SCORE = 70;
@@ -624,6 +625,7 @@ function classifyCandidate(symbol, packs) {
   const mtfText = packs.mtf ? getReportText(packs.mtf) : "";
   const liquidationFlow = packs.liquidation || null;
   const whaleActivity = packs.whaleActivity || null;
+  const correlation = packs.correlation || null;
 
   const allText = `
 ${accumulationText}
@@ -860,6 +862,11 @@ ${mtfText}
     }
   }
 
+  if (correlation?.status === "available") {
+    score += correlation.scoreAdjust || 0;
+    if (correlation.rationale) reasons.push(correlation.rationale);
+  }
+
   score = Math.max(0, Math.min(100, score));
 
   if (!hasCoreData) {
@@ -970,6 +977,7 @@ ${mtfText}
     conflicts,
     liquidationFlow,
     whaleActivity,
+    correlation,
     divergences,
 
     price,
@@ -1134,6 +1142,17 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
         onProgress
       );
 
+      await onProgress({
+        percent: basePercent + 15,
+        stage: "$" + symbol + " Correlation",
+        message: "🧭 Comparing $" + symbol + " with correlated market assets...",
+      });
+
+      const correlation = await analyzeCorrelation(symbol, "7d", {
+        executeSkill: (skillName, params) =>
+          executeSkillWithFallback(skillName, params, onProgress),
+      });
+
       const result = {
         ...classifyCandidate(symbol, {
           accumulation,
@@ -1141,6 +1160,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
           orderbook,
           liquidation,
           whaleActivity,
+          correlation,
           mtf,
         }),
         venue,
@@ -1268,11 +1288,16 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
     timeframes: ["1h", "4h", "1d"],
   };
 
-  const mtf = await executeSkillWithFallback(
-    "analyze_multi_timeframe_trend_alignment",
-    mtfParams,
-    onProgress
-  );
+  await onProgress({
+    percent: 92,
+    stage: "$" + symbol + " Correlation",
+    message: "🧭 Comparing $" + symbol + " with correlated market assets...",
+  });
+
+  const correlation = await analyzeCorrelation(symbol, "7d", {
+    executeSkill: (skillName, params) =>
+      executeSkillWithFallback(skillName, params, onProgress),
+  });
 
   return {
     ...classifyCandidate(symbol, {
@@ -1281,6 +1306,7 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
       orderbook,
       liquidation,
       whaleActivity,
+      correlation,
       mtf,
     }),
     venue,
