@@ -14,8 +14,40 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 const { executeSkill } = require("./cmcClient");const { buildCMCParams, buildPerpAnalysisParams, normalizeVenue } = require("./exchangeAdapter");const { analyzeDivergence } = require("./divergence");const { checkWhaleActivity } = require("./whaleAlerts");const { analyzeCorrelation } = require("./correlation");const { RequestQueue } = require("./queue");
-const { collectMarketEvidence } = require("./providers/publicProviders");const { buildCrossSourceSignals } = require("./providers/crossSource");
+const { collectMarketEvidence } = require("./providers/publicProviders");
+const { buildCrossSourceSignals } = require("./providers/crossSource");
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -48,7 +80,37 @@ const ACTIVE_SIGNAL_SCORE = 70;const WATCHLIST_SCORE = 40;const MAX_SCAN_CANDIDA
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Global request queue: 1 concurrent skill call to avoid overwhelming CMCconst skillQueue = new RequestQueue(1, 1);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -80,7 +142,37 @@ const ACTIVE_SIGNAL_SCORE = 70;const WATCHLIST_SCORE = 40;const MAX_SCAN_CANDIDA
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function normalizeSymbol(symbol) {  return String(symbol || "")    .trim()    .replace(/^\$/, "")    .toUpperCase();}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -104,7 +196,28 @@ function parseJsonText(value) {  if (typeof value !== "string") return null;  tr
 
 
 
+
+
+
+
+
+
+
 function expandJsonStrings(value, depth = 0) {  if (depth > 6 || value === null || value === undefined) return value;  if (typeof value === "string") {    const parsed = parseJsonText(value);    return parsed === null ? value : expandJsonStrings(parsed, depth + 1);  }  if (Array.isArray(value)) {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -121,9 +234,26 @@ function expandJsonStrings(value, depth = 0) {  if (depth > 6 || value === null 
 
   await onProgress({    percent: 97,    stage: "$" + symbol + " Multi-Source Evidence",    message: "🌐 Collecting public CEX, DEX and sentiment evidence...",  });
 
+
   const marketEvidence = await collectMarketEvidence(symbol, { venue });  marketEvidence.sources.unshift({    provider: "coinmarketcap",    status: "ok",    timestamp: Date.now(),    fields: ["accumulation", "perpetual", "orderbook", "trend", "liquidation"],    attribution: "CoinMarketCap Skill Hub",  });
 
+
   return {    ...classifyCandidate(symbol, {      accumulation,      perp,      orderbook,      liquidation,      whaleActivity,      correlation,      mtf,      marketEvidence,    }),    venue,  };}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
