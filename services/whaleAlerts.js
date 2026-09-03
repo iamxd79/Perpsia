@@ -942,7 +942,7 @@ async function checkWhaleActivity(symbol, options = {}) {
       limit,
     });
 
-    if (activity.status !== "unavailable") {
+    if (activity.status !== "unavailable" && !(activity.warnings || []).length) {
       publicCache.set(cacheKey, {
         timestamp: Date.now(),
         data: activity,
