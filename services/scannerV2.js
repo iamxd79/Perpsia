@@ -788,6 +788,7 @@ ${mtfText}
     reasons,
 
     summary: cleanRead(
+      packs.perp?.result?.data?.data?.decision_report?.conclusion ||
       packs.perp?.result?.data?.decision_report?.conclusion
     ),
   };
@@ -1021,6 +1022,7 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 module.exports = {
   runMarketScan,
   analyzeAsset,
+  classifyCandidate,
   normalizeSymbol,
   executeSkillWithFallback,
   getCachedResult,
