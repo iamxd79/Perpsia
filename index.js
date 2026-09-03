@@ -1,9 +1,13 @@
 require("dotenv").config();
 
 
+
+
 const {
   buildReasoningBrief,
 } = require("./services/openaiReasoning");
+
+
 
 
 const {
@@ -14,7 +18,11 @@ const {
 } = require("./services/intentRouter");
 
 
+
+
 const TelegramBot = require("node-telegram-bot-api").default;
+
+
 
 
 // ========== TIER 1: PRODUCTION SCANNER WITH CMC CONNECTION ==========
@@ -24,6 +32,8 @@ const {
 } = require("./services/scannerV2");
 
 
+
+
 const {
   isExchangeSupported,
   listSupportedExchanges,
@@ -31,9 +41,13 @@ const {
 } = require("./services/exchangeAdapter");
 
 
+
+
 // ========== BACKTESTER FOR PAPER TRADING ==========
 const { Backtester } = require("./services/backtester");
 const backtester = new Backtester();
+
+
 
 
 const {
@@ -45,10 +59,14 @@ const {
 } = require("./services/memory");
 
 
+
+
 const {
   getLifecycleStage,
   formatLifecycleUpdate,
 } = require("./services/lifecycle");
+
+
 
 
 const {
@@ -57,10 +75,14 @@ const {
 } = require("./services/decay");
 
 
+
+
 const {
   getCounterThesis,
   formatCounterThesis,
 } = require("./services/counterThesis");
+
+
 
 
 const {
@@ -69,9 +91,13 @@ const {
 } = require("./services/riskEngine");
 
 
+
+
 const {
   startScheduler,
 } = require("./services/scheduler");
+
+
 
 
 const {
@@ -80,9 +106,13 @@ const {
 } = require("./services/scanLock");
 
 
+
+
 const {
   getPerformance,
+  getPerformanceRows,
   recordSignal: recordPerformanceSignal,
+  getStorageInfo,
 } = require("./services/performance");
 const {
   recordSignal: recordTelemetrySignal,
@@ -95,6 +125,9 @@ const { cmcCircuitBreaker } = require("./services/resilience");
 
 
 
+
+
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -103,11 +136,13 @@ function escapeHtml(value) {
     .replaceAll(String.fromCharCode(34), "&quot;");
 }
 
+
 function performanceDashboardHtml(payload) {
   const stats = payload?.last_30_days || {};
   const status = payload?.data_status || "unknown";
   const card = (label, value) =>
     "<div class=\"card\"><span>" + label + "</span><strong>" + escapeHtml(value) + "</strong></div>";
+
 
   return [
     "<!doctype html><html><head><meta charset=\"utf-8\">",
@@ -135,8 +170,10 @@ function performanceDashboardHtml(payload) {
   ].join("");
 }
 
+
 async function handleHttpRequest(req, res) {
   const requestUrl = new URL(req.url || "/", "http://perpsia.local");
+
 
   try {
     if (requestUrl.pathname === "/metrics") {
@@ -147,6 +184,7 @@ async function handleHttpRequest(req, res) {
       res.end(renderPrometheus());
       return;
     }
+
 
     if (requestUrl.pathname === "/api/performance") {
       const rawDays = Number(requestUrl.searchParams.get("days") || 30);
@@ -159,10 +197,27 @@ async function handleHttpRequest(req, res) {
       res.writeHead(200, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": process.env.PERFORMANCE_CORS_ORIGIN || "*",
       });
       res.end(JSON.stringify(payload));
       return;
     }
+
+
+    if (requestUrl.pathname === "/api/performance/trades") {
+      const rawDays = Number(requestUrl.searchParams.get("days") || 30);
+      const rows = getPerformanceRows({
+        lookbackDays: Number.isFinite(rawDays) ? rawDays : 30,
+      });
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": process.env.PERFORMANCE_CORS_ORIGIN || "*",
+      });
+      res.end(JSON.stringify({ trades: rows }));
+      return;
+    }
+
 
     if (requestUrl.pathname === "/performance") {
       const payload = await getPerformance({ lookbackDays: 30 });
@@ -174,6 +229,7 @@ async function handleHttpRequest(req, res) {
       res.end(performanceDashboardHtml(payload));
       return;
     }
+
 
     res.writeHead(200, {
       "Content-Type": "application/json; charset=utf-8",
@@ -199,8 +255,10 @@ async function handleHttpRequest(req, res) {
           performance: "/api/performance",
           dashboard: "/performance",
           metrics: "/metrics",
+          performance_trades: "/api/performance/trades",
         },
         circuit_breaker: cmcCircuitBreaker.snapshot(),
+        storage: getStorageInfo(),
       })
     );
   } catch (error) {
@@ -221,13 +279,20 @@ async function handleHttpRequest(req, res) {
 
 
 
+
+
+
 // ==========================================
 // ENVIRONMENT
 // ==========================================
 
 
+
+
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const autonomousChatId = process.env.TELEGRAM_CHAT_ID;
+
+
 
 
 if (!token) {
@@ -236,9 +301,13 @@ if (!token) {
 }
 
 
+
+
 // ==========================================
 // TELEGRAM BOT
 // ==========================================
+
+
 
 
 const bot = new TelegramBot(
@@ -254,24 +323,65 @@ const bot = new TelegramBot(
 );
 
 
+
+
+let pollingRetryTimer = null;
+let pollingRetryAttempt = 0;
+let pollingRestarting = false;
+
+function isTelegramPollingConflict(error) {
+  return (
+    error?.response?.body?.error_code === 409 ||
+    /409 Conflict|terminated by other getUpdates request/i.test(error?.message || "")
+  );
+}
+
+function scheduleTelegramPollingRetry() {
+  if (pollingRetryTimer) return;
+  const delay = Math.min(60000, 10000 * Math.pow(2, pollingRetryAttempt));
+  pollingRetryAttempt = Math.min(pollingRetryAttempt + 1, 3);
+  console.error(
+    "Telegram polling conflict; retrying in " + Math.round(delay / 1000) + "s."
+  );
+  pollingRetryTimer = setTimeout(() => {
+    pollingRetryTimer = null;
+    void startTelegramPolling();
+  }, delay);
+}
+
+async function startTelegramPolling() {
+  if (pollingRestarting) return;
+  pollingRestarting = true;
+
+  try {
+    await bot.startPolling();
+    pollingRetryAttempt = 0;
+    console.log("Telegram polling started.");
+  } catch (error) {
+    if (isTelegramPollingConflict(error)) {
+      scheduleTelegramPollingRetry();
+    } else {
+      console.error("Telegram polling failed to start:", error.message);
+      process.exitCode = 1;
+    }
+  } finally {
+    pollingRestarting = false;
+  }
+}
+
 bot.on("polling_error", (error) => {
-  const errorCode = error?.response?.body?.error_code;
-  const errorMessage = error?.message || "";
-
-
-  if (errorCode === 409 || /409 Conflict/i.test(errorMessage)) {
+  if (isTelegramPollingConflict(error)) {
     console.error(
-      "Telegram polling stopped: another process is already polling this bot token."
+      "Telegram polling conflict: another process currently owns this bot token."
     );
-
-
-    bot.stopPolling().catch(() => {});
+    void bot.stopPolling().catch(() => {});
+    scheduleTelegramPollingRetry();
     return;
   }
 
-
-  console.error("Telegram polling error:", errorMessage);
+  console.error("Telegram polling error:", error?.message || error);
 });
+
 
 
 // ==========================================
@@ -279,7 +389,11 @@ bot.on("polling_error", (error) => {
 // ==========================================
 
 
+
+
 let isAnalyzeRunning = false;
+
+
 
 
 // ==========================================
@@ -287,18 +401,26 @@ let isAnalyzeRunning = false;
 // ==========================================
 
 
+
+
 function progressBar(percent) {
   const total = 10;
   const filled = Math.round((percent / 100) * total);
+
+
 
 
   return "█".repeat(filled) + "░".repeat(10 - filled);
 }
 
 
+
+
 // ==========================================
 // SAFE TELEGRAM MESSAGE EDIT
 // ==========================================
+
+
 
 
 async function safeEditMessage(chatId, messageId, text) {
@@ -311,13 +433,19 @@ async function safeEditMessage(chatId, messageId, text) {
 }
 
 
+
+
 // ==========================================
 // FORMAT SCAN RESULT (v2)
 // ==========================================
 
 
+
+
 function formatLiquidationFlow(flow) {
   if (!flow || flow.status !== "available") return "";
+
+
 
 
   const risk = String(flow.cascadeRisk || "NONE").replaceAll("_", " ");
@@ -327,9 +455,13 @@ function formatLiquidationFlow(flow) {
   ];
 
 
+
+
   if (Array.isArray(flow.reasons) && flow.reasons.length) {
     lines.push(...flow.reasons.slice(0, 3).map((reason) => "• " + reason));
   }
+
+
 
 
   if (Array.isArray(flow.recentLiqs) && flow.recentLiqs.length) {
@@ -337,8 +469,12 @@ function formatLiquidationFlow(flow) {
   }
 
 
+
+
   return lines.join(String.fromCharCode(10));
 }
+
+
 
 
 function formatDivergenceReport(divergences) {
@@ -346,10 +482,14 @@ function formatDivergenceReport(divergences) {
   const lines = ["⚠️ DIVERGENCES"];
 
 
+
+
   if (!list.length) {
     lines.push("No material momentum divergence detected.");
     return lines.join(String.fromCharCode(10));
   }
+
+
 
 
   for (const divergence of list.slice(0, 5)) {
@@ -360,12 +500,18 @@ function formatDivergenceReport(divergences) {
       : "";
 
 
+
+
     lines.push("• [" + severity + "] " + message + adjustment);
   }
 
 
+
+
   return lines.join(String.fromCharCode(10));
 }
+
+
 
 
 function formatUsd(value) {
@@ -378,8 +524,12 @@ function formatUsd(value) {
 }
 
 
+
+
 function formatWhaleActivity(activity) {
   if (!activity || activity.status !== "available") return "";
+
+
 
 
   const lines = [
@@ -388,14 +538,20 @@ function formatWhaleActivity(activity) {
   ];
 
 
+
+
   if (activity.volumeToExchanges > 0) {
     lines.push("To exchanges: $" + formatUsd(activity.volumeToExchanges));
   }
 
 
+
+
   if (activity.volumeFromExchanges > 0) {
     lines.push("From exchanges: $" + formatUsd(activity.volumeFromExchanges));
   }
+
+
 
 
   if (activity.largestMove?.valueUsd > 0) {
@@ -409,14 +565,22 @@ function formatWhaleActivity(activity) {
   }
 
 
+
+
   return lines.join(String.fromCharCode(10));
 }
 
 
 
 
+
+
+
+
 function formatCorrelationReport(correlation) {
   if (!correlation || correlation.status !== "available") return "";
+
+
 
 
   const formatPairs = (pairs) =>
@@ -432,10 +596,14 @@ function formatCorrelationReport(correlation) {
       .join(", ");
 
 
+
+
   const lines = [
     "🧭 CORRELATION ANALYSIS",
     correlation.rationale || "Cross-asset context available.",
   ];
+
+
 
 
   if (correlation.supportive?.length) {
@@ -443,9 +611,13 @@ function formatCorrelationReport(correlation) {
   }
 
 
+
+
   if (correlation.headwinds?.length) {
     lines.push("Headwinds: " + formatPairs(correlation.headwinds));
   }
+
+
 
 
   if (correlation.freshnessNote) {
@@ -453,8 +625,14 @@ function formatCorrelationReport(correlation) {
   }
 
 
+
+
   return lines.join(String.fromCharCode(10));
 }
+
+
+
+
 
 
 
@@ -465,6 +643,8 @@ function formatScanResult(result) {
     result.shorts.length +
     result.watchlist.length +
     result.neutral.length;
+
+
 
 
   let output = `⚡ PERPSIA MARKET INTELLIGENCE
@@ -480,12 +660,16 @@ Assets analyzed: ${total}
 `;
 
 
+
+
   if (result.longs.length > 0) {
     output += `🚀 LONG SIGNALS\n\n`;
     result.longs.forEach((signal) => {
       output += `$${signal.symbol} — ${signal.score}/100\nMarket State: ${signal.marketState}\n\n`;
     });
   }
+
+
 
 
   if (result.shorts.length > 0) {
@@ -496,12 +680,16 @@ Assets analyzed: ${total}
   }
 
 
+
+
   if (result.watchlist.length > 0) {
     output += `\n👀 WATCHLIST\n\n`;
     result.watchlist.slice(0, 5).forEach((signal) => {
       output += `$${signal.symbol} — ${signal.score}/100\nMarket State: ${signal.marketState}\n\n`;
     });
   }
+
+
 
 
   const liquidationSignals = [
@@ -516,8 +704,12 @@ Assets analyzed: ${total}
   );
 
 
+
+
   if (liquidationSignals.length > 0) {
     output += "\n🔥 LIQUIDATION FLOW\n\n";
+
+
 
 
     liquidationSignals.slice(0, 5).forEach((signal) => {
@@ -535,6 +727,8 @@ Assets analyzed: ${total}
   }
 
 
+
+
   const divergenceSignals = [
     ...result.longs,
     ...result.shorts,
@@ -543,7 +737,11 @@ Assets analyzed: ${total}
   ].filter((signal) => Array.isArray(signal.divergences) && signal.divergences.length);
 
 
+
+
   output += "\n⚠️ DIVERGENCES\n\n";
+
+
 
 
   if (!divergenceSignals.length) {
@@ -567,6 +765,10 @@ Assets analyzed: ${total}
 
 
 
+
+
+
+
   const whaleSignals = [
     ...result.longs,
     ...result.shorts,
@@ -575,8 +777,12 @@ Assets analyzed: ${total}
   ].filter((signal) => signal.whaleActivity?.status === "available");
 
 
+
+
   if (whaleSignals.length > 0) {
     output += "\n🐋 WHALE ACTIVITY\n\n";
+
+
 
 
     whaleSignals.slice(0, 5).forEach((signal) => {
@@ -585,9 +791,13 @@ Assets analyzed: ${total}
       output += (activity.summary || "Large-holder transfer activity detected.") + "\n";
 
 
+
+
       if (activity.volumeToExchanges > 0) {
         output += "To exchanges: $" + formatUsd(activity.volumeToExchanges) + "\n";
       }
+
+
 
 
       if (activity.volumeFromExchanges > 0) {
@@ -595,9 +805,15 @@ Assets analyzed: ${total}
       }
 
 
+
+
       output += "\n";
     });
   }
+
+
+
+
 
 
 
@@ -614,8 +830,12 @@ Assets analyzed: ${total}
   );
 
 
+
+
   if (correlationSignals.length > 0) {
     output += "\n🧭 CORRELATION CONTEXT\n\n";
+
+
 
 
     correlationSignals.slice(0, 5).forEach((signal) => {
@@ -623,6 +843,8 @@ Assets analyzed: ${total}
       output += "$" + signal.symbol + "\n";
       output +=
         (correlation.rationale || "Cross-asset context available.") + "\n";
+
+
 
 
       if (correlation.supportive?.length) {
@@ -642,6 +864,8 @@ Assets analyzed: ${total}
       }
 
 
+
+
       if (correlation.headwinds?.length) {
         output +=
           "Headwind links: " +
@@ -659,9 +883,13 @@ Assets analyzed: ${total}
       }
 
 
+
+
       output += "\n";
     });
   }
+
+
 
 
   if (result.errors.length > 0) {
@@ -672,8 +900,12 @@ Assets analyzed: ${total}
   }
 
 
+
+
   return output;
 }
+
+
 
 
 function formatBacktestResult(result) {
@@ -682,11 +914,15 @@ function formatBacktestResult(result) {
   }
 
 
+
+
   const stats = result.stats || {};
   const formatPercent = (value) => Number.isFinite(value) ? Number(value).toFixed(2) + "%" : "N/A";
   const profitFactor = stats.profitFactor === null ? "∞" : Number.isFinite(stats.profitFactor) ? Number(stats.profitFactor).toFixed(2) : "N/A";
   const start = result.dateRange?.start ? new Date(result.dateRange.start).toISOString().slice(0, 10) : "N/A";
   const end = result.dateRange?.end ? new Date(result.dateRange.end).toISOString().slice(0, 10) : "N/A";
+
+
 
 
   const lines = [
@@ -708,9 +944,13 @@ function formatBacktestResult(result) {
   ];
 
 
+
+
   if (result.dataQuality?.errors?.length) {
     lines.push("", "⚠️ Data quality: " + result.dataQuality.errors.join("; "));
   }
+
+
 
 
   lines.push("", "Paper trading only. No live orders were placed.");
@@ -718,9 +958,13 @@ function formatBacktestResult(result) {
 }
 
 
+
+
 // ==========================================
 // START COMMAND
 // ==========================================
+
+
 
 
 function getHelpMessage() {
@@ -762,6 +1006,8 @@ You can also talk naturally:
 "I have $500, risk 1%, max leverage 5x"
 "Check Perpsia status"`;
 }
+
+
 
 
 bot.onText(/\/start/, async (msg) => {
@@ -808,14 +1054,20 @@ What would you like to do?`,
 });
 
 
+
+
 // ==========================================
 // HELP COMMAND
 // ==========================================
 
 
+
+
 bot.onText(/\/help/, async (msg) => {
   await bot.sendMessage(msg.chat.id, getHelpMessage());
 });
+
+
 
 
 bot.onText(/\/backtest(?:\s+([A-Za-z0-9$_-]+))?(?:\s+([0-9]+))?/, async (msg, match) => {
@@ -824,9 +1076,13 @@ bot.onText(/\/backtest(?:\s+([A-Za-z0-9$_-]+))?(?:\s+([0-9]+))?/, async (msg, ma
   const requestedDays = Number(match[2] || 90);
 
 
+
+
   if (!Number.isInteger(requestedDays) || requestedDays < 1 || requestedDays > 365) {
     return bot.sendMessage(chatId, "Use /backtest BTC [days] with days between 1 and 365.");
   }
+
+
 
 
   const endDate = Date.now();
@@ -836,6 +1092,8 @@ bot.onText(/\/backtest(?:\s+([A-Za-z0-9$_-]+))?(?:\s+([0-9]+))?/, async (msg, ma
     "⏳ PERPSIA PAPER BACKTEST" + String.fromCharCode(10) + String.fromCharCode(10) +
       "Fetching " + requestedDays + " days of Binance futures data for $" + symbol + "...",
   );
+
+
 
 
   try {
@@ -851,6 +1109,8 @@ bot.onText(/\/backtest(?:\s+([A-Za-z0-9$_-]+))?(?:\s+([0-9]+))?/, async (msg, ma
     });
 
 
+
+
     await safeEditMessage(chatId, loading.message_id, formatBacktestResult(result));
   } catch (error) {
     console.error("Paper backtest failed:", error);
@@ -863,9 +1123,13 @@ bot.onText(/\/backtest(?:\s+([A-Za-z0-9$_-]+))?(?:\s+([0-9]+))?/, async (msg, ma
 });
 
 
+
+
 // ==========================================
 // RISK SETTINGS COMMAND
 // ==========================================
+
+
 
 
 bot.onText(
@@ -874,9 +1138,13 @@ bot.onText(
     const chatId = msg.chat.id;
 
 
+
+
     const capital = Number(match[1]);
     const riskPercent = Number(match[2]);
     const maxLeverage = Number(match[3]);
+
+
 
 
     if (
@@ -902,12 +1170,16 @@ Maximum leverage: 5x`
     }
 
 
+
+
     saveRiskSettings(
       chatId,
       capital,
       riskPercent,
       maxLeverage
     );
+
+
 
 
     await bot.sendMessage(
@@ -924,13 +1196,19 @@ Perpsia will apply this profile when an actionable LONG or SHORT setup is detect
 );
 
 
+
+
 // ==========================================
 // MARKET SCAN RUNNER (v2 - LIVE CMC)
 // ==========================================
 
 
+
+
 async function runManualScan(chatId, venue = "Binance") {
   venue = normalizeVenue(venue);
+
+
 
 
   if (!lockScan()) {
@@ -945,6 +1223,8 @@ Please wait for the current scan to finish.`
   }
 
 
+
+
   const loading = await bot.sendMessage(
     chatId,
     `🟢 PERPSIA LIVE SCAN — ${venue}
@@ -953,6 +1233,8 @@ ${progressBar(5)} 5%
 
 Booting market intelligence engine...`
   );
+
+
 
 
   try {
@@ -970,6 +1252,8 @@ Current stage:
 ${progress.stage}`
       );
     });
+
+
 
 
     for (const signal of [
@@ -993,10 +1277,14 @@ Preparing market intelligence report...`
     );
 
 
+
+
     await bot.sendMessage(chatId, formatScanResult(result));
   } catch (error) {
     console.error("Manual market scan failed:", error);
     recordScan("manual", "error");
+
+
 
 
     await safeEditMessage(
@@ -1014,13 +1302,19 @@ ${error.message}${/CMC_(?:MCP_ENDPOINT|API_KEY)/i.test(error.message) ? "\n\nMak
 }
 
 
+
+
 // ==========================================
 // MARKET SCAN COMMAND
 // ==========================================
 
 
+
+
 bot.onText(/\/scan(?:\s+([A-Za-z]+))?/, async (msg, match) => {
   const venue = match[1] || "Binance";
+
+
 
 
   if (!isExchangeSupported(venue)) {
@@ -1035,7 +1329,11 @@ Supported: ${listSupportedExchanges()
   }
 
 
+
+
   const cooldown = checkCooldown(msg.chat.id, "scan");
+
+
 
 
   if (!cooldown.allowed) {
@@ -1046,13 +1344,19 @@ Supported: ${listSupportedExchanges()
   }
 
 
+
+
   await runManualScan(msg.chat.id, venue);
 });
+
+
 
 
 // ==========================================
 // ASSET ANALYSIS COMMAND (v2 - LIVE CMC)
 // ==========================================
+
+
 
 
 async function runAssetAnalysis(
@@ -1066,6 +1370,8 @@ async function runAssetAnalysis(
     .toUpperCase();
 
 
+
+
   if (!isExchangeSupported(venue)) {
     return bot.sendMessage(
       chatId,
@@ -1078,10 +1384,16 @@ Supported: ${listSupportedExchanges()
   }
 
 
+
+
   venue = normalizeVenue(venue);
 
 
+
+
   const cooldown = checkCooldown(chatId, "analyze");
+
+
 
 
   if (!cooldown.allowed) {
@@ -1090,6 +1402,8 @@ Supported: ${listSupportedExchanges()
       `Slow down. You can analyze again in ${cooldown.remainingSeconds}s.`
     );
   }
+
+
 
 
   if (isAnalyzeRunning) {
@@ -1104,7 +1418,11 @@ Please wait for it to finish.`
   }
 
 
+
+
   isAnalyzeRunning = true;
+
+
 
 
   const loading = await bot.sendMessage(
@@ -1117,18 +1435,26 @@ Starting deep market analysis...`
   );
 
 
+
+
   try {
     // ======================================
     // LOAD PREVIOUS MEMORY
     // ======================================
 
 
+
+
     const previous = getLastAssetState(symbol);
+
+
 
 
     // ======================================
     // RUN CMC SKILL HUB ANALYSIS (LIVE)
     // ======================================
+
+
 
 
     const result = await analyzeAsset(
@@ -1151,6 +1477,8 @@ ${progress.stage}`
     );
 
 
+
+
     recordTelemetrySignal(result);
     recordPerformanceSignal(result, "manual_analysis");
     recordScan("manual_analysis", "success");
@@ -1159,18 +1487,26 @@ ${progress.stage}`
     // ======================================
 
 
+
+
     const lifecycle = getLifecycleStage(
       result,
       previous
     );
 
 
+
+
     result.lifecycleStage = lifecycle.stage;
+
+
 
 
     // ======================================
     // SIGNAL DECAY ENGINE
     // ======================================
+
+
 
 
     const decay = getSignalDecay(
@@ -1179,18 +1515,26 @@ ${progress.stage}`
     );
 
 
+
+
     // ======================================
     // COUNTER-THESIS ENGINE
     // ======================================
+
+
 
 
     const counterThesis =
       getCounterThesis(result);
 
 
+
+
     // ======================================
     // MEMORY COMPARISON
     // ======================================
+
+
 
 
     const memoryChange = compareAssetState(
@@ -1199,13 +1543,19 @@ ${progress.stage}`
     );
 
 
+
+
     // ======================================
     // PERSONALIZED RISK ENGINE
     // ======================================
 
 
+
+
     const riskSettings =
       getRiskSettings(chatId);
+
+
 
 
     const riskPlan = riskSettings
@@ -1219,12 +1569,18 @@ ${progress.stage}`
       : null;
 
 
+
+
     // ======================================
     // SAVE NEW MEMORY STATE
     // ======================================
 
 
+
+
     saveAssetState(result);
+
+
 
 
     // ======================================
@@ -1232,7 +1588,11 @@ ${progress.stage}`
     // ======================================
 
 
+
+
     let report = ``;
+
+
 
 
     if (!result.hasCoreData) {
@@ -1256,6 +1616,8 @@ No signal generated.`;
           : "⚪";
 
 
+
+
       report = `${icon} PERPSIA ANALYSIS — $${symbol}
 
 Market State: ${result.marketState}
@@ -1274,6 +1636,8 @@ Score: ${result.score}/100
 
 ${result.reasons.slice(0, 4).map((r) => `• ${r}`).join("\n")}
 `;
+
+
 
 
       if (result.isActionable) {
@@ -1301,12 +1665,18 @@ ${result.confirmationNeeded.map((item) => `• ${item}`).join("\n")}`;
     }
 
 
+
+
     // ======================================
     // ADD LIFECYCLE, DECAY, COUNTER-THESIS
     // ======================================
 
 
+
+
     const divergenceText = formatDivergenceReport(result.divergences);
+
+
 
 
     const liquidationText = formatLiquidationFlow(result.liquidationFlow);
@@ -1314,9 +1684,13 @@ ${result.confirmationNeeded.map((item) => `• ${item}`).join("\n")}`;
     const correlationText = formatCorrelationReport(result.correlation);
 
 
+
+
     const lifecycleText = formatLifecycleUpdate(lifecycle);
     const decayText = formatSignalDecay(decay);
     const counterText = formatCounterThesis(counterThesis);
+
+
 
 
     // ======================================
@@ -1324,7 +1698,11 @@ ${result.confirmationNeeded.map((item) => `• ${item}`).join("\n")}`;
     // ======================================
 
 
+
+
     let riskText = "";
+
+
 
 
     if (result.isActionable) {
@@ -1340,9 +1718,13 @@ Set your profile with:
     }
 
 
+
+
     // ======================================
     // FINAL MESSAGE
     // ======================================
+
+
 
 
     const finalMessage = [
@@ -1360,9 +1742,13 @@ Set your profile with:
       .join("\n\n");
 
 
+
+
     // ======================================
     // COMPLETE PROGRESS MESSAGE
     // ======================================
+
+
 
 
     await safeEditMessage(
@@ -1376,6 +1762,8 @@ Perpsia intelligence report ready.`
     );
 
 
+
+
     await bot.sendMessage(
       chatId,
       finalMessage
@@ -1386,6 +1774,8 @@ Perpsia intelligence report ready.`
       error
     );
     recordScan("manual_analysis", "error");
+
+
 
 
     await safeEditMessage(
@@ -1403,9 +1793,13 @@ ${error.message}`
 }
 
 
+
+
 // ==========================================
 // /ANALYZE COMMAND ROUTER
 // ==========================================
+
+
 
 
 bot.onText(
@@ -1414,12 +1808,18 @@ bot.onText(
     const chatId = msg.chat.id;
 
 
+
+
     const symbol =
       match[1].toUpperCase();
 
 
+
+
     const venue =
       match[2] || "Binance";
+
+
 
 
     await runAssetAnalysis(
@@ -1431,9 +1831,13 @@ bot.onText(
 );
 
 
+
+
 // ==========================================
 // NATURAL LANGUAGE INTENT ROUTER
 // ==========================================
+
+
 
 
 bot.on("message", async (msg) => {
@@ -1441,8 +1845,12 @@ bot.on("message", async (msg) => {
   const text = msg.text?.trim();
 
 
+
+
   if (!text) return;
   if (text.startsWith("/")) return;
+
+
 
 
   const DIRECT_TEXT_WORDS = new Set([
@@ -1457,11 +1865,17 @@ bot.on("message", async (msg) => {
   ]);
 
 
+
+
   const symbolOnlyMatch = text.match(/^\$?([A-Za-z0-9]{2,15})$/);
+
+
 
 
   if (symbolOnlyMatch) {
     const symbol = symbolOnlyMatch[1].toUpperCase();
+
+
 
 
     if (!DIRECT_TEXT_WORDS.has(symbol)) {
@@ -1470,11 +1884,17 @@ bot.on("message", async (msg) => {
   }
 
 
+
+
   try {
     await bot.sendChatAction(chatId, "typing");
 
 
+
+
     const cooldown = checkCooldown(chatId, "intent");
+
+
 
 
     if (!cooldown.allowed) {
@@ -1485,10 +1905,16 @@ bot.on("message", async (msg) => {
     }
 
 
+
+
     const route = await routeIntent(text);
 
 
+
+
     console.log("Perpsia routed intent:", route);
+
+
 
 
     if (
@@ -1510,6 +1936,8 @@ Check Perpsia status`
     }
 
 
+
+
     if (route.intent === "conversation") {
       return bot.sendMessage(
         chatId,
@@ -1517,6 +1945,8 @@ Check Perpsia status`
           "I'm online. Send me an asset or ask me to scan the market."
       );
     }
+
+
 
 
     if (route.intent === "analyze_asset") {
@@ -1528,6 +1958,8 @@ Check Perpsia status`
       }
 
 
+
+
       return runAssetAnalysis(
         chatId,
         String(route.symbol).replace(/^\$/, "").toUpperCase(),
@@ -1536,15 +1968,21 @@ Check Perpsia status`
     }
 
 
+
+
     if (route.intent === "scan_market") {
       return runManualScan(chatId, "Binance");
     }
+
+
 
 
     if (route.intent === "set_risk") {
       const capital = Number(route.capital);
       const riskPercent = Number(route.riskPercent);
       const maxLeverage = Number(route.maxLeverage);
+
+
 
 
       if (
@@ -1565,7 +2003,11 @@ I have $500, risk 1%, max leverage 5x`
       }
 
 
+
+
       saveRiskSettings(chatId, capital, riskPercent, maxLeverage);
+
+
 
 
       return bot.sendMessage(
@@ -1577,6 +2019,8 @@ Risk per trade: ${riskPercent}%
 Max leverage: ${maxLeverage}x`
       );
     }
+
+
 
 
     if (route.intent === "status") {
@@ -1599,9 +2043,13 @@ Prometheus Metrics: /metrics`
     }
 
 
+
+
     if (route.intent === "help") {
       return bot.sendMessage(chatId, getHelpMessage());
     }
+
+
 
 
     return bot.sendMessage(
@@ -1610,6 +2058,8 @@ Prometheus Metrics: /metrics`
     );
   } catch (error) {
     console.error("Natural language routing failed:", error);
+
+
 
 
     return bot.sendMessage(
@@ -1622,9 +2072,13 @@ Please try again or use /help.`
 });
 
 
+
+
 // ==========================================
 // INLINE BUTTON HANDLER
 // ==========================================
+
+
 
 
 bot.on("callback_query", async (query) => {
@@ -1632,12 +2086,18 @@ bot.on("callback_query", async (query) => {
   const action = query.data;
 
 
+
+
   await bot.answerCallbackQuery(query.id);
+
+
 
 
   if (action === "scan_market") {
     return runManualScan(chatId, "Binance");
   }
+
+
 
 
   if (action === "analyze_asset") {
@@ -1654,6 +2114,8 @@ Or use:
   }
 
 
+
+
   if (action === "set_risk") {
     return bot.sendMessage(
       chatId,
@@ -1668,15 +2130,21 @@ I have $500, risk 1%, max leverage 5x`
   }
 
 
+
+
   if (action === "show_commands") {
     return bot.sendMessage(chatId, getHelpMessage());
   }
 });
 
 
+
+
 // ==========================================
 // CHAT ID COMMAND
 // ==========================================
+
+
 
 
 bot.onText(/\/chatid/, async (msg) => {
@@ -1691,15 +2159,21 @@ This ID can be used for autonomous Perpsia reports, alerts, and deployment confi
 });
 
 
+
+
 // ==========================================
 // STATUS COMMAND
 // ==========================================
+
+
 
 
 bot.onText(/\/status/, async (msg) => {
   const schedulerStatus = autonomousChatId
     ? "ACTIVE"
     : "NOT CONFIGURED";
+
+
 
 
   await bot.sendMessage(
@@ -1726,15 +2200,18 @@ Prometheus Metrics: /metrics
 });
 
 
-bot.startPolling().catch((error) => {
-  console.error("Telegram polling failed to start:", error.message);
-  process.exitCode = 1;
-});
+
+
+void startTelegramPolling();
+
+
 
 
 // ==========================================
 // START AUTONOMOUS SCHEDULER
 // ==========================================
+
+
 
 
 startScheduler({
@@ -1743,14 +2220,20 @@ startScheduler({
 });
 
 
+
+
 // ==========================================
 // RENDER HEALTH SERVER
 // ==========================================
 
 
+
+
 const http = require("http");
 
+
 const PORT = process.env.PORT || 3000;
+
 
 http
   .createServer((req, res) => {
@@ -1764,7 +2247,9 @@ http
 // ==========================================
 
 
-console.log("✅ Perpsia Terminal v2.0 is running...");
+
+
+console.log("✅ Perpsia Terminal v2.1 is running...");
 console.log("📡 TIER 1 CRITICAL GAPS RESOLVED:");
 console.log("   ✅ Live CMC Skill Hub connection");
 console.log("   ✅ Request queue with retry logic");
