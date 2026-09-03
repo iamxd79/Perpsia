@@ -189,7 +189,7 @@ function emptyStats() {
 class Backtester {
   constructor(options = {}) {
     this.httpClient = options.httpClient || axios;
-    this.futuresBaseUrl = options.futuresBaseUrl || "https://fapi.binance.com";
+    this.futuresBaseUrl = options.futuresBaseUrl || process.env.BACKTEST_FUTURES_BASE_URL || "https://fapi.binance.com";
     this.defaultInterval = options.interval || DEFAULT_INTERVAL;
     this.defaultLookbackDays = options.defaultLookbackDays || DEFAULT_LOOKBACK_DAYS;
     this.maxLookbackDays = options.maxLookbackDays || MAX_LOOKBACK_DAYS;
@@ -609,7 +609,7 @@ class Backtester {
       return {
         symbol: String(symbol).toUpperCase(),
         status: "error",
-        message: "No historical futures candles available.",
+        message: "Historical market data unavailable." + (data.errors.length ? " " + data.errors.join("; ") : ""),
         trades: [],
         stats: emptyStats(),
         dataQuality: { fundingPoints: data.funding.length, openInterestPoints: data.openInterest.length, errors: data.errors },
