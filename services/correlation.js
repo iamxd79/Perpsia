@@ -1,16 +1,7 @@
 const { executeSkill } = require("./cmcClient");
 
 const CORRELATION_SKILL = "analyze_cross_asset_performance_divergence";
-const DEFAULT_COMPARISON_ASSETS = [
-  "BTC",
-  "ETH",
-  "BNB",
-  "SOL",
-  "XRP",
-  "DOGE",
-  "ADA",
-  "AVAX",
-];
+const DEFAULT_COMPARISON_ASSETS = ["BTC", "ETH", "BNB"];
 
 function normalizeSymbol(symbol) {
   return String(symbol || "")
