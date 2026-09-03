@@ -179,7 +179,7 @@ function readStructuredValue(payloads, aliases) {
 function toFiniteNumber(value) {
   const scalar =
     value && typeof value === "object"
-      ? value.value ?? value.rate ?? value.percent ?? value.percentage ?? value.change ?? value.pct
+      ? value.value ?? value.rate ?? value.percent ?? value.percentage ?? value.change ?? value.pct ?? value.price ?? value.level ?? value.notional ?? value.amount ?? value.size
       : value;
 
   if (typeof scalar === "number") {
@@ -200,6 +200,153 @@ function toFiniteNumber(value) {
 function readMetric(payloads, aliases) {
   return toFiniteNumber(readStructuredValue(payloads, aliases));
 }
+
+function parseLookbackDays(lookback) {
+  const parsed = Number.parseInt(String(lookback || "7"), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 30) : 7;
+}
+
+function parseLiquidationFlow(payload, referencePrice = null) {
+  const price =
+    referencePrice !== null
+      ? toFiniteNumber(referencePrice)
+      : readMetric([payload], ["current_price", "mark_price", "last_price", "price"]);
+
+  const longLiqZone = readMetric([payload], [
+    "long_liquidation_zone",
+    "long_liq_zone",
+    "long_liquidation_cluster",
+    "long_liq_cluster",
+    "long_liquidation_price",
+    "long_liq_price",
+    "long_liquidation_level",
+  ]);
+  const shortLiqZone = readMetric([payload], [
+    "short_liquidation_zone",
+    "short_liq_zone",
+    "short_liquidation_cluster",
+    "short_liq_cluster",
+    "short_liquidation_price",
+    "short_liq_price",
+    "short_liquidation_level",
+  ]);
+  const longNotional = readMetric([payload], [
+    "long_liquidation_notional",
+    "long_liq_notional",
+    "long_liquidation_size",
+    "long_liq_size",
+  ]);
+  const shortNotional = readMetric([payload], [
+    "short_liquidation_notional",
+    "short_liq_notional",
+    "short_liquidation_size",
+    "short_liq_size",
+  ]);
+
+  const recentLiqs = findArraysByKey(payload, [
+    "recent_liquidations",
+    "recent_liqs",
+    "liquidation_events",
+    "liquidation_history",
+    "liquidations",
+  ])
+    .flat()
+    .slice(0, 20);
+
+  const longZoneAbove =
+    price !== null && longLiqZone !== null && longLiqZone > price;
+  const shortZoneBelow =
+    price !== null && shortLiqZone !== null && shortLiqZone < price;
+
+  let score = 0;
+  const reasons = [];
+
+  if (longZoneAbove) {
+    const distance = Math.round((longLiqZone / price - 1) * 100);
+    score -= 10;
+    reasons.push(
+      "Long liquidation zone is " +
+        distance +
+        "% above price; crowded-long resistance risk." +
+        (longNotional !== null ? " Estimated notional: " + longNotional + "." : "")
+    );
+  }
+
+  if (shortZoneBelow) {
+    const distance = Math.round((1 - shortLiqZone / price) * 100);
+    score += 25;
+    reasons.push(
+      "Short liquidation zone is " +
+        distance +
+        "% below price; squeeze fuel is present." +
+        (shortNotional !== null ? " Estimated notional: " + shortNotional + "." : "")
+    );
+  }
+
+  const hasData =
+    price !== null &&
+    (longLiqZone !== null || shortLiqZone !== null || recentLiqs.length > 0);
+
+  const cascadeRisk = shortZoneBelow
+    ? "SHORT_SQUEEZE_RISK"
+    : longZoneAbove
+    ? "LONG_CROWDING_RISK"
+    : "NONE";
+
+  return {
+    status: hasData ? "available" : "insufficient_data",
+    price,
+    longLiqZone,
+    shortLiqZone,
+    longNotional,
+    shortNotional,
+    recentLiqs,
+    cascadeRisk,
+    score,
+    reasons,
+  };
+}
+
+async function analyzeLiquidationFlow(
+  symbol,
+  timeframe = "4h",
+  lookback = "7d",
+  venue = "Binance",
+  referencePrice = null
+) {
+  const params = buildCMCParams(symbol, venue, {
+    timeframe: String(timeframe || "4h"),
+    lookback_days: parseLookbackDays(lookback),
+  });
+
+  try {
+    const payload = await executeSkillWithFallback(
+      "analyze_liquidation_zones",
+      params
+    );
+
+    return parseLiquidationFlow(payload, referencePrice);
+  } catch (error) {
+    console.warn(
+      "Liquidation flow unavailable for " + symbol + ": " + error.message
+    );
+
+    return {
+      status: "unavailable",
+      price: null,
+      longLiqZone: null,
+      shortLiqZone: null,
+      longNotional: null,
+      shortNotional: null,
+      recentLiqs: [],
+      cascadeRisk: "UNKNOWN",
+      score: 0,
+      reasons: [],
+      error: error.message,
+    };
+  }
+}
+
 
 function stringifyReadable(value) {
   if (value === null || value === undefined || value === "") return "";
@@ -474,6 +621,7 @@ function classifyCandidate(symbol, packs) {
   const perpText = getReportText(packs.perp);
   const orderbookText = packs.orderbook ? getReportText(packs.orderbook) : "";
   const mtfText = packs.mtf ? getReportText(packs.mtf) : "";
+  const liquidationFlow = packs.liquidation || null;
 
   const allText = `
 ${accumulationText}
@@ -663,6 +811,11 @@ ${mtfText}
     reasons.push("The asset appears overextended, increasing pullback or reversal risk.");
   }
 
+  if (liquidationFlow?.status === "available") {
+    score += liquidationFlow.score;
+    reasons.push(...liquidationFlow.reasons);
+  }
+
   score = Math.max(0, Math.min(100, score));
 
   if (!hasCoreData) {
@@ -771,6 +924,7 @@ ${mtfText}
     },
 
     conflicts,
+    liquidationFlow,
 
     price,
     priceChange,
@@ -876,6 +1030,25 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
       );
 
       await onProgress({
+        percent: basePercent + 8,
+        stage: "$" + symbol + " Liquidation Flow",
+        message: "🔥 Analyzing $" + symbol + " liquidation zones and cascade risk...",
+      });
+
+      const referencePrice = readMetric(
+        [accumulation, perp],
+        ["current_price", "mark_price", "last_price", "price"]
+      );
+
+      const liquidation = await analyzeLiquidationFlow(
+        symbol,
+        "4h",
+        "7d",
+        venue,
+        referencePrice
+      );
+
+      await onProgress({
         percent: basePercent + 10,
         stage: `$${symbol} Orderbook`,
         message: `🧱 Reading $${symbol} bid and ask pressure...`,
@@ -911,6 +1084,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
           accumulation,
           perp,
           orderbook,
+          liquidation,
           mtf,
         }),
         venue,
@@ -986,6 +1160,25 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
   );
 
   await onProgress({
+    percent: 55,
+    stage: "$" + symbol + " Liquidation Flow",
+    message: "🔥 Analyzing $" + symbol + " liquidation zones and cascade risk...",
+  });
+
+  const referencePrice = readMetric(
+    [accumulation, perp],
+    ["current_price", "mark_price", "last_price", "price"]
+  );
+
+  const liquidation = await analyzeLiquidationFlow(
+    symbol,
+    "4h",
+    "7d",
+    venue,
+    referencePrice
+  );
+
+  await onProgress({
     percent: 65,
     stage: `$${symbol} Orderbook`,
     message: `🧱 Checking $${symbol} bid and ask pressure...`,
@@ -1021,6 +1214,7 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
       accumulation,
       perp,
       orderbook,
+      liquidation,
       mtf,
     }),
     venue,
@@ -1032,6 +1226,8 @@ module.exports = {
   runMarketScan,
   analyzeAsset,
   classifyCandidate,
+  analyzeLiquidationFlow,
+  parseLiquidationFlow,
   normalizeSymbol,
   executeSkillWithFallback,
   getCachedResult,
