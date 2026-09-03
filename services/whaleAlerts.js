@@ -1,36 +1,84 @@
 const axios = require("axios");
 
-const DEFAULT_ENDPOINT =
-  process.env.WHALE_ALERT_ENDPOINT ||
-  "https://api.whale-alert.io/v1/transactions";
-const DEFAULT_MIN_VALUE_USD = 1000000;
+const TRANSFER_TOPIC =
+  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a3e8f5a7d";
+
 const DEFAULT_LOOKBACK_HOURS = 24;
+const DEFAULT_MIN_VALUE_USD = 1000000;
 const DEFAULT_LIMIT = 10;
 const CACHE_TTL_MS = 10 * 60 * 1000;
+const DEFAULT_LOG_CHUNK_SIZE = 2000;
+const DEFAULT_SOLANA_SIGNATURE_LIMIT = 100;
 
-const whaleCache = new Map();
+const DEFAULT_RPC_URLS = {
+  ethereum: "https://cloudflare-eth.com",
+  arbitrum: "https://arb1.arbitrum.io/rpc",
+  optimism: "https://mainnet.optimism.io",
+  base: "https://mainnet.base.org",
+  polygon: "https://polygon-rpc.com",
+  bsc: "https://bsc-dataseed.binance.org",
+  solana: "https://api.mainnet.solana.com",
+};
 
-const EXCHANGE_LABELS = [
-  "binance",
-  "bybit",
-  "okx",
-  "okex",
-  "coinbase",
-  "kraken",
-  "kucoin",
-  "gate.io",
-  "gateio",
-  "bitget",
-  "bitfinex",
-  "bitstamp",
-  "gemini",
-  "huobi",
-  "mexc",
-  "upbit",
-  "poloniex",
-  "deribit",
-  "crypto.com",
-];
+const DEFAULT_BLOCK_TIMES = {
+  ethereum: 12,
+  arbitrum: 0.25,
+  optimism: 2,
+  base: 2,
+  polygon: 2,
+  bsc: 3,
+};
+
+const DEFAULT_ASSET_REGISTRY = {
+  BTC: [
+    {
+      chain: "ethereum",
+      contract: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+      symbol: "WBTC",
+      priceSymbol: "BTC",
+      decimals: 8,
+    },
+  ],
+  ETH: [
+    {
+      chain: "ethereum",
+      contract: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      symbol: "WETH",
+      priceSymbol: "ETH",
+      decimals: 18,
+    },
+  ],
+  USDT: [
+    {
+      chain: "ethereum",
+      contract: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      symbol: "USDT",
+      priceSymbol: "USDT",
+      decimals: 6,
+    },
+  ],
+  USDC: [
+    {
+      chain: "ethereum",
+      contract: "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      symbol: "USDC",
+      priceSymbol: "USDC",
+      decimals: 6,
+    },
+  ],
+  DAI: [
+    {
+      chain: "ethereum",
+      contract: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+      symbol: "DAI",
+      priceSymbol: "DAI",
+      decimals: 18,
+    },
+  ],
+};
+
+const publicCache = new Map();
+const priceCache = new Map();
 
 function normalizeSymbol(symbol) {
   return String(symbol || "")
@@ -38,6 +86,22 @@ function normalizeSymbol(symbol) {
     .replace(/^\$/, "")
     .replace(/\s+/g, "")
     .toUpperCase();
+}
+
+function normalizeChain(chain) {
+  const value = String(chain || "").trim().toLowerCase();
+  const aliases = {
+    eth: "ethereum",
+    mainnet: "ethereum",
+    arb: "arbitrum",
+    op: "optimism",
+    matic: "polygon",
+    binance: "bsc",
+    "bnb smart chain": "bsc",
+    sol: "solana",
+  };
+
+  return aliases[value] || value;
 }
 
 function toFiniteNumber(value) {
@@ -58,151 +122,580 @@ function toFiniteNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function timestampToMs(value) {
-  if (value === null || value === undefined || value === "") return null;
+function parseJsonEnv(name, fallback) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
 
-  if (typeof value === "number" || /^\d+(?:\.\d+)?$/.test(String(value).trim())) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return null;
-    return numeric < 100000000000 ? numeric * 1000 : numeric;
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    console.warn("Invalid JSON in " + name + "; using defaults.");
+    return fallback;
+  }
+}
+
+function getRpcUrls() {
+  const configured = parseJsonEnv("ONCHAIN_RPC_URLS", {});
+  return {
+    ...DEFAULT_RPC_URLS,
+    ...(configured && typeof configured === "object" ? configured : {}),
+  };
+}
+
+function getAssetRegistry() {
+  const configured = parseJsonEnv("ONCHAIN_ASSET_REGISTRY", {});
+  return {
+    ...DEFAULT_ASSET_REGISTRY,
+    ...(configured && typeof configured === "object" ? configured : {}),
+  };
+}
+
+function normalizeAssetConfigs(symbol) {
+  const normalizedSymbol = normalizeSymbol(symbol);
+  const registry = getAssetRegistry();
+  const raw =
+    registry[normalizedSymbol] ||
+    registry[normalizedSymbol.toLowerCase()] ||
+    null;
+  const entries = Array.isArray(raw) ? raw : raw ? [raw] : [];
+
+  return entries
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+
+      const chain = normalizeChain(entry.chain || entry.network);
+      const address = String(
+        entry.contract || entry.mint || entry.address || ""
+      ).trim();
+
+      if (!chain || !address) return null;
+
+      return {
+        chain,
+        address,
+        symbol: normalizeSymbol(entry.symbol || normalizedSymbol),
+        priceSymbol: normalizeSymbol(
+          entry.priceSymbol || entry.price_symbol || entry.symbol || normalizedSymbol
+        ),
+        decimals: Number.isInteger(Number(entry.decimals))
+          ? Number(entry.decimals)
+          : null,
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeAddress(address) {
+  return String(address || "").trim().toLowerCase();
+}
+
+function getExchangeRegistry() {
+  const raw = parseJsonEnv("ONCHAIN_EXCHANGE_ADDRESSES", {});
+  const registry = {};
+
+  const add = (chain, address, label) => {
+    const normalizedChain = normalizeChain(chain);
+    const normalizedAddress = normalizeAddress(address);
+    if (!normalizedChain || !normalizedAddress) return;
+
+    if (!registry[normalizedChain]) registry[normalizedChain] = new Map();
+    registry[normalizedChain].set(
+      normalizedAddress,
+      String(label || "Known Exchange")
+    );
+  };
+
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      add(entry?.chain, entry?.address, entry?.label);
+    }
+  } else if (raw && typeof raw === "object") {
+    for (const [chain, entries] of Object.entries(raw)) {
+      if (Array.isArray(entries)) {
+        for (const entry of entries) {
+          if (typeof entry === "string") add(chain, entry, "Known Exchange");
+          else add(chain, entry?.address, entry?.label);
+        }
+      } else if (entries && typeof entries === "object") {
+        for (const [address, label] of Object.entries(entries)) {
+          if (label && typeof label === "object") {
+            add(chain, address, label.label || label.name);
+          } else {
+            add(chain, address, label);
+          }
+        }
+      }
+    }
   }
 
-  const parsed = Date.parse(String(value));
-  return Number.isFinite(parsed) ? parsed : null;
+  return registry;
 }
 
-function isExchangeLabel(value) {
-  if (value === true) return true;
-  if (!value) return false;
-
-  const text = String(value).trim().toLowerCase();
-  return (
-    text === "exchange" ||
-    text.includes("exchange") ||
-    EXCHANGE_LABELS.some((label) => text.includes(label))
-  );
+function exchangeLabel(exchangeRegistry, chain, address) {
+  return exchangeRegistry[normalizeChain(chain)]?.get(normalizeAddress(address)) || null;
 }
 
-function normalizeEndpoint(endpoint) {
-  const record =
-    endpoint && typeof endpoint === "object"
-      ? endpoint
-      : { address: endpoint, label: endpoint };
+function hexToNumber(value) {
+  const parsed = Number.parseInt(String(value || "0x0"), 16);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
-  const owner = record.owner;
-  const ownerLabel =
-    owner && typeof owner === "object"
-      ? owner.label || owner.name || owner.type
-      : owner;
+function topicAddress(topic) {
+  const value = String(topic || "");
+  return value.length >= 40 ? "0x" + value.slice(-40).toLowerCase() : null;
+}
 
-  const label =
-    record.label ||
-    ownerLabel ||
-    record.name ||
-    record.type ||
-    record.entity ||
-    "unknown";
+function safeAmountFromRaw(raw, decimals) {
+  try {
+    const integer = BigInt(raw || "0x0");
+    const divisor = 10 ** Math.max(0, Number(decimals || 0));
+    const amount = Number(integer) / divisor;
+    return Number.isFinite(amount) ? amount : null;
+  } catch {
+    return null;
+  }
+}
 
+function makeMove({
+  hash,
+  timestamp,
+  asset,
+  amount,
+  valueUsd,
+  from,
+  fromLabel,
+  fromIsExchange,
+  to,
+  toLabel,
+  toIsExchange,
+  chain,
+}) {
   return {
-    address:
-      record.address ||
-      record.owner_address ||
-      record.wallet_address ||
-      record.hash ||
-      null,
-    label: String(label || "unknown"),
-    isExchange:
-      record.is_exchange === true ||
-      record.isExchange === true ||
-      isExchangeLabel(label) ||
-      isExchangeLabel(record.type) ||
-      isExchangeLabel(record.entity),
-  };
-}
-
-function normalizeTransaction(transaction, symbol) {
-  const timestampMs = timestampToMs(
-    transaction.timestamp ||
-      transaction.time ||
-      transaction.datetime ||
-      transaction.date
-  );
-
-  if (timestampMs === null) return null;
-
-  const from = normalizeEndpoint(transaction.from || transaction.sender);
-  const to = normalizeEndpoint(transaction.to || transaction.receiver);
-  const amountUsd = toFiniteNumber(
-    transaction.amount_usd ??
-      transaction.amountUsd ??
-      transaction.value_usd ??
-      transaction.valueUsd ??
-      transaction.usd_value ??
-      transaction.estimated_value_usd
-  );
-
-  if (amountUsd === null) return null;
-
-  return {
-    hash:
-      transaction.hash ||
-      transaction.tx_hash ||
-      transaction.transaction_hash ||
-      null,
-    timestamp: timestampMs,
-    time: new Date(timestampMs).toISOString(),
-    asset: normalizeSymbol(
-      transaction.symbol ||
-        transaction.currency ||
-        transaction.asset ||
-        symbol
-    ),
-    amount: toFiniteNumber(transaction.amount),
-    valueUsd: amountUsd,
-    from: from.address,
-    fromLabel: from.label,
-    fromIsExchange: from.isExchange,
-    to: to.address,
-    toLabel: to.label,
-    toIsExchange: to.isExchange,
+    hash: hash || null,
+    timestamp,
+    time: new Date(timestamp).toISOString(),
+    asset: normalizeSymbol(asset),
+    amount,
+    valueUsd,
+    from: from || null,
+    fromLabel: fromLabel || "Unknown Wallet",
+    fromIsExchange: Boolean(fromIsExchange),
+    to: to || null,
+    toLabel: toLabel || "Unknown Wallet",
+    toIsExchange: Boolean(toIsExchange),
     transferType:
-      from.isExchange && to.isExchange
+      fromIsExchange && toIsExchange
         ? "EXCHANGE_TO_EXCHANGE"
-        : to.isExchange
+        : toIsExchange
         ? "TO_EXCHANGE"
-        : from.isExchange
+        : fromIsExchange
         ? "FROM_EXCHANGE"
         : "WALLET_TO_WALLET",
-    chain: transaction.blockchain || transaction.chain || null,
+    chain: normalizeChain(chain),
+    source: "PUBLIC_RPC",
   };
 }
 
-function normalizeWhaleTransactions(transactions, symbol, options = {}) {
-  const lookbackHours = Number(options.lookbackHours || DEFAULT_LOOKBACK_HOURS);
+async function rpcCall(url, method, params) {
+  const response = await axios.post(
+    url,
+    {
+      jsonrpc: "2.0",
+      id: Date.now(),
+      method,
+      params,
+    },
+    { timeout: 15000 }
+  );
+
+  const body = response?.data;
+  if (body?.error) {
+    throw new Error(
+      method +
+        ": " +
+        (body.error.message || body.error.code || "RPC error")
+    );
+  }
+
+  if (body?.result === undefined) {
+    throw new Error(method + ": RPC response did not include result.");
+  }
+
+  return body.result;
+}
+
+async function getPriceUsd(symbol, config) {
+  const priceSymbol = normalizeSymbol(
+    config.priceSymbol || config.symbol || symbol
+  );
+  const stablecoins = new Set(["USDT", "USDC", "DAI", "USDS", "FDUSD"]);
+  if (stablecoins.has(priceSymbol)) return 1;
+
+  const cached = priceCache.get(priceSymbol);
+  if (cached && Date.now() - cached.timestamp < 60 * 1000) {
+    return cached.value;
+  }
+
+  const endpoint =
+    process.env.ONCHAIN_PRICE_ENDPOINT ||
+    "https://api.binance.com/api/v3/ticker/price";
+  const market =
+    priceSymbol.endsWith("USDT") ? priceSymbol : priceSymbol + "USDT";
+
+  try {
+    const response = await axios.get(endpoint, {
+      timeout: 10000,
+      params: { symbol: market },
+    });
+    const value = toFiniteNumber(response?.data?.price);
+
+    if (value === null || value <= 0) return null;
+
+    priceCache.set(priceSymbol, {
+      timestamp: Date.now(),
+      value,
+    });
+
+    return value;
+  } catch (error) {
+    console.warn(
+      "Public price unavailable for " + priceSymbol + ": " + error.message
+    );
+    return null;
+  }
+}
+
+async function collectEvmTransfers(config, requestedSymbol, options, exchangeRegistry) {
+  const rpcUrls = getRpcUrls();
+  const rpcUrl = rpcUrls[config.chain];
+
+  if (!rpcUrl) {
+    throw new Error("No public RPC configured for " + config.chain + ".");
+  }
+
+  const latest = hexToNumber(await rpcCall(rpcUrl, "eth_blockNumber", []));
+  const blockTime = DEFAULT_BLOCK_TIMES[config.chain] || 12;
+  const lookbackHours = Number(
+    options.lookbackHours || DEFAULT_LOOKBACK_HOURS
+  );
+  const lookbackBlocks = Math.ceil(
+    (Math.max(1, lookbackHours) * 60 * 60) / blockTime
+  );
+  const fromBlock = Math.max(0, latest - lookbackBlocks - 2);
+  const chunkSize = Math.max(
+    100,
+    Math.min(5000, Number(options.logChunkSize || DEFAULT_LOG_CHUNK_SIZE))
+  );
   const minValueUsd = Number(
     options.minValueUsd || DEFAULT_MIN_VALUE_USD
   );
-  const cutoff = Date.now() - Math.max(1, lookbackHours) * 60 * 60 * 1000;
+  const price = await getPriceUsd(requestedSymbol, config);
+  const moves = [];
 
-  return (Array.isArray(transactions) ? transactions : [])
-    .map((transaction) => normalizeTransaction(transaction, symbol))
-    .filter(
-      (transaction) =>
-        transaction &&
-        transaction.timestamp >= cutoff &&
-        transaction.valueUsd >= minValueUsd
+  if (price === null) {
+    return {
+      moves,
+      warnings: [
+        "No public USD price was available for " +
+          normalizeSymbol(config.priceSymbol || config.symbol || requestedSymbol) +
+          ".",
+      ],
+      unpricedTransfers: 1,
+    };
+  }
+
+  for (
+    let start = fromBlock;
+    start <= latest;
+    start += chunkSize
+  ) {
+    const end = Math.min(latest, start + chunkSize - 1);
+    const logs = await rpcCall(rpcUrl, "eth_getLogs", [
+      {
+        address: config.address,
+        fromBlock: "0x" + start.toString(16),
+        toBlock: "0x" + end.toString(16),
+        topics: [TRANSFER_TOPIC],
+      },
+    ]);
+
+    for (const log of Array.isArray(logs) ? logs : []) {
+      if (!Array.isArray(log.topics) || log.topics.length < 3) continue;
+
+      const from = topicAddress(log.topics[1]);
+      const to = topicAddress(log.topics[2]);
+      const amount = safeAmountFromRaw(log.data, config.decimals);
+
+      if (!from || !to || amount === null) continue;
+
+      const valueUsd = amount * price;
+      if (!Number.isFinite(valueUsd) || valueUsd < minValueUsd) continue;
+
+      const fromLabel = exchangeLabel(exchangeRegistry, config.chain, from);
+      const toLabel = exchangeLabel(exchangeRegistry, config.chain, to);
+      const blockNumber = hexToNumber(log.blockNumber);
+      const timestamp =
+        Date.now() -
+        Math.max(0, latest - blockNumber) * blockTime * 1000;
+
+      moves.push(
+        makeMove({
+          hash: log.transactionHash,
+          timestamp,
+          asset: requestedSymbol,
+          amount,
+          valueUsd,
+          from,
+          fromLabel: fromLabel || "Unknown Wallet",
+          fromIsExchange: Boolean(fromLabel),
+          to,
+          toLabel: toLabel || "Unknown Wallet",
+          toIsExchange: Boolean(toLabel),
+          chain: config.chain,
+        })
+      );
+    }
+  }
+
+  return { moves, warnings: [], unpricedTransfers: 0 };
+}
+
+function solanaAccountKey(accountKeys, index) {
+  const account = accountKeys?.[index];
+  return typeof account === "string" ? account : account?.pubkey || null;
+}
+
+function tokenBalanceAmount(entry) {
+  const tokenAmount = entry?.uiTokenAmount;
+  if (!tokenAmount) return null;
+
+  const raw = toFiniteNumber(tokenAmount.amount);
+  const decimals = Number(tokenAmount.decimals || 0);
+  if (raw === null) return null;
+
+  return raw / 10 ** decimals;
+}
+
+async function collectSolanaTransfers(config, requestedSymbol, options, exchangeRegistry) {
+  const rpcUrls = getRpcUrls();
+  const rpcUrl = rpcUrls.solana;
+
+  if (!rpcUrl) throw new Error("No public Solana RPC configured.");
+
+  const solanaExchanges = exchangeRegistry.solana || new Map();
+  if (!solanaExchanges.size) {
+    return {
+      moves: [],
+      warnings: [
+        "Solana exchange addresses are not configured in ONCHAIN_EXCHANGE_ADDRESSES.",
+      ],
+      unpricedTransfers: 0,
+    };
+  }
+
+  const price = await getPriceUsd(requestedSymbol, config);
+  if (price === null) {
+    return {
+      moves: [],
+      warnings: [
+        "No public USD price was available for " +
+          normalizeSymbol(config.priceSymbol || config.symbol || requestedSymbol) +
+          ".",
+      ],
+      unpricedTransfers: 1,
+    };
+  }
+
+  const lookbackHours = Number(
+    options.lookbackHours || DEFAULT_LOOKBACK_HOURS
+  );
+  const cutoff = Date.now() - Math.max(1, lookbackHours) * 60 * 60 * 1000;
+  const signatureLimit = Math.max(
+    10,
+    Math.min(
+      1000,
+      Number(options.solanaSignatureLimit || DEFAULT_SOLANA_SIGNATURE_LIMIT)
     )
-    .sort((a, b) => b.timestamp - a.timestamp);
+  );
+  const moves = [];
+  const seen = new Set();
+
+  for (const [exchangeAddress, exchangeName] of [
+    ...solanaExchanges.entries(),
+  ].slice(0, 20)) {
+    const tokenAccounts = new Set([exchangeAddress]);
+
+    try {
+      const accountResult = await rpcCall(
+        rpcUrl,
+        "getTokenAccountsByOwner",
+        [
+          exchangeAddress,
+          { mint: config.address },
+          { encoding: "jsonParsed" },
+        ]
+      );
+
+      for (const account of accountResult?.value || []) {
+        if (account?.pubkey) tokenAccounts.add(account.pubkey.toLowerCase());
+      }
+    } catch (error) {
+      console.warn(
+        "Solana token accounts unavailable for " +
+          exchangeName +
+          ": " +
+          error.message
+      );
+    }
+
+    for (const tokenAccount of tokenAccounts) {
+      let signatures = [];
+
+      try {
+        signatures = await rpcCall(
+          rpcUrl,
+          "getSignaturesForAddress",
+          [tokenAccount, { limit: signatureLimit }]
+        );
+      } catch (error) {
+        console.warn(
+          "Solana signatures unavailable for " +
+            exchangeName +
+            ": " +
+            error.message
+        );
+        continue;
+      }
+
+      for (const signatureInfo of signatures || []) {
+        const timestamp = Number(signatureInfo?.blockTime || 0) * 1000;
+        if (!timestamp || timestamp < cutoff) continue;
+
+        let transaction;
+        try {
+          transaction = await rpcCall(
+            rpcUrl,
+            "getTransaction",
+            [
+              signatureInfo.signature,
+              { encoding: "jsonParsed", maxSupportedTransactionVersion: 0 },
+            ]
+          );
+        } catch (error) {
+          continue;
+        }
+
+        const meta = transaction?.meta;
+        if (!meta) continue;
+
+        const accountKeys = transaction?.transaction?.message?.accountKeys || [];
+        const pre = meta.preTokenBalances || [];
+        const post = meta.postTokenBalances || [];
+        const balances = new Map();
+
+        for (const entry of [...pre, ...post]) {
+          if (normalizeSymbol(entry?.mint) !== normalizeSymbol(config.address)) {
+            continue;
+          }
+
+          const key =
+            String(entry.accountIndex) +
+            ":" +
+            String(entry.mint || "").toLowerCase();
+          const current = balances.get(key) || {
+            accountIndex: entry.accountIndex,
+            owner: entry.owner || null,
+            pre: 0,
+            post: 0,
+            decimals: Number(entry.uiTokenAmount?.decimals || config.decimals || 0),
+          };
+
+          if (pre.includes(entry)) current.pre = tokenBalanceAmount(entry) || 0;
+          if (post.includes(entry)) current.post = tokenBalanceAmount(entry) || 0;
+          current.owner =
+            current.owner ||
+            entry.owner ||
+            solanaAccountKey(accountKeys, entry.accountIndex);
+          balances.set(key, current);
+        }
+
+        for (const balance of balances.values()) {
+          const accountKey = solanaAccountKey(accountKeys, balance.accountIndex);
+          const owner = normalizeAddress(balance.owner);
+          const account = normalizeAddress(accountKey);
+          const isExchange =
+            solanaExchanges.has(owner) || solanaExchanges.has(account);
+          if (!isExchange) continue;
+
+          const delta = balance.post - balance.pre;
+          if (!delta) continue;
+
+          const amount = Math.abs(delta);
+          const valueUsd = amount * price;
+          if (!Number.isFinite(valueUsd) || valueUsd < minValueUsd) continue;
+
+          const direction = delta > 0 ? "to" : "from";
+          const dedupeKey =
+            signatureInfo.signature + ":" + balance.accountIndex + ":" + direction;
+          if (seen.has(dedupeKey)) continue;
+          seen.add(dedupeKey);
+
+          const exchangeLabel =
+            solanaExchanges.get(owner) ||
+            solanaExchanges.get(account) ||
+            exchangeName;
+
+          moves.push(
+            makeMove({
+              hash: signatureInfo.signature,
+              timestamp,
+              asset: requestedSymbol,
+              amount,
+              valueUsd,
+              from: delta > 0 ? null : accountKey,
+              fromLabel: delta > 0 ? "Unknown Wallet" : exchangeLabel,
+              fromIsExchange: delta < 0,
+              to: delta > 0 ? accountKey : null,
+              toLabel: delta > 0 ? exchangeLabel : "Unknown Wallet",
+              toIsExchange: delta > 0,
+              chain: "solana",
+            })
+          );
+        }
+      }
+    }
+  }
+
+  return { moves, warnings: [], unpricedTransfers: 0 };
 }
 
 function formatUsd(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "$0";
-
   if (number >= 1000000000) return "$" + (number / 1000000000).toFixed(1) + "B";
   if (number >= 1000000) return "$" + (number / 1000000).toFixed(1) + "M";
   if (number >= 1000) return "$" + (number / 1000).toFixed(1) + "K";
   return "$" + number.toFixed(0);
+}
+
+function normalizeWhaleTransactions(transactions, symbol, options = {}) {
+  const lookbackHours = Number(options.lookbackHours || DEFAULT_LOOKBACK_HOURS);
+  const minValueUsd = Number(options.minValueUsd || DEFAULT_MIN_VALUE_USD);
+  const cutoff = Date.now() - Math.max(1, lookbackHours) * 60 * 60 * 1000;
+
+  return (Array.isArray(transactions) ? transactions : [])
+    .filter(
+      (transaction) =>
+        transaction &&
+        Number(transaction.timestamp) >= cutoff &&
+        Number(transaction.valueUsd) >= minValueUsd
+    )
+    .map((transaction) => ({
+      ...transaction,
+      asset: normalizeSymbol(transaction.asset || symbol),
+      valueUsd: Number(transaction.valueUsd),
+    }))
+    .sort((a, b) => b.timestamp - a.timestamp);
 }
 
 function summarizeWhaleMoves(
@@ -211,19 +704,23 @@ function summarizeWhaleMoves(
   lookbackHours = DEFAULT_LOOKBACK_HOURS
 ) {
   const recentMoves = Array.isArray(moves) ? moves : [];
-  const volumeToExchanges = recentMoves
+  const toExchanges = recentMoves
     .filter((move) => move.toIsExchange)
-    .reduce((sum, move) => sum + move.valueUsd, 0);
-  const volumeFromExchanges = recentMoves
+    .reduce((sum, move) => sum + Number(move.valueUsd || 0), 0);
+  const fromExchanges = recentMoves
     .filter((move) => move.fromIsExchange)
-    .reduce((sum, move) => sum + move.valueUsd, 0);
+    .reduce((sum, move) => sum + Number(move.valueUsd || 0), 0);
+  const total = recentMoves.reduce(
+    (sum, move) => sum + Number(move.valueUsd || 0),
+    0
+  );
   const windowLabel = String(lookbackHours) + "h";
 
   if (!recentMoves.length) {
     return (
       "No " +
       formatUsd(DEFAULT_MIN_VALUE_USD) +
-      "+ whale transfers detected for $" +
+      "+ public on-chain transfers detected for $" +
       symbol +
       " in the last " +
       windowLabel +
@@ -231,25 +728,25 @@ function summarizeWhaleMoves(
     );
   }
 
-  if (volumeToExchanges > volumeFromExchanges) {
+  if (toExchanges > fromExchanges && toExchanges > 0) {
     return (
       "🐋 " +
-      formatUsd(volumeToExchanges) +
+      formatUsd(toExchanges) +
       " $" +
       symbol +
-      " transferred to exchanges in the last " +
+      " transferred to labeled exchanges in the last " +
       windowLabel +
       " — potential sell-side pressure."
     );
   }
 
-  if (volumeFromExchanges > volumeToExchanges) {
+  if (fromExchanges > toExchanges && fromExchanges > 0) {
     return (
       "🐋 " +
-      formatUsd(volumeFromExchanges) +
+      formatUsd(fromExchanges) +
       " $" +
       symbol +
-      " transferred from exchanges in the last " +
+      " transferred from labeled exchanges in the last " +
       windowLabel +
       " — potential accumulation."
     );
@@ -257,61 +754,73 @@ function summarizeWhaleMoves(
 
   return (
     "🐋 " +
-    formatUsd(volumeToExchanges + volumeFromExchanges) +
+    formatUsd(total) +
     " $" +
     symbol +
-    " moved across exchange-linked wallets in the last " +
+    " moved on-chain in the last " +
     windowLabel +
-    " — transfer pressure is mixed."
+    " — exchange attribution is mixed or not configured."
   );
 }
 
-function buildActivity(symbol, moves, options = {}) {
-  const volumeToExchanges = moves
+function buildActivity(
+  symbol,
+  moves,
+  options,
+  warnings,
+  unpricedTransfers,
+  assets
+) {
+  const limitedMoves = moves
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, Math.max(1, Number(options.limit || DEFAULT_LIMIT)));
+  const toExchanges = limitedMoves
     .filter((move) => move.toIsExchange)
-    .reduce((sum, move) => sum + move.valueUsd, 0);
-  const volumeFromExchanges = moves
+    .reduce((sum, move) => sum + Number(move.valueUsd || 0), 0);
+  const fromExchanges = limitedMoves
     .filter((move) => move.fromIsExchange)
-    .reduce((sum, move) => sum + move.valueUsd, 0);
-
-  const largest = (list) =>
-    list.length
-      ? list.reduce((best, move) =>
-          move.valueUsd > best.valueUsd ? move : best
-        )
-      : null;
+    .reduce((sum, move) => sum + Number(move.valueUsd || 0), 0);
+  const largest = limitedMoves.length
+    ? limitedMoves.reduce((best, move) =>
+        move.valueUsd > best.valueUsd ? move : best
+      )
+    : null;
 
   return {
-    status: "available",
+    status: limitedMoves.length ? "available" : "insufficient_data",
     symbol,
+    provider: "PUBLIC_RPC",
     lookbackHours: Number(options.lookbackHours || DEFAULT_LOOKBACK_HOURS),
     minValueUsd: Number(options.minValueUsd || DEFAULT_MIN_VALUE_USD),
-    transactions: moves,
-    recentMoves: moves,
-    volumeToExchanges,
-    volumeFromExchanges,
-    largestMove: largest(moves),
-    largestToExchange: largest(moves.filter((move) => move.toIsExchange)),
-    largestFromExchange: largest(
-      moves.filter((move) => move.fromIsExchange)
-    ),
+    transactions: limitedMoves,
+    recentMoves: limitedMoves,
+    volumeToExchanges: toExchanges,
+    volumeFromExchanges: fromExchanges,
+    largestMove: largest,
+    largestToExchange:
+      limitedMoves
+        .filter((move) => move.toIsExchange)
+        .sort((a, b) => b.valueUsd - a.valueUsd)[0] || null,
+    largestFromExchange:
+      limitedMoves
+        .filter((move) => move.fromIsExchange)
+        .sort((a, b) => b.valueUsd - a.valueUsd)[0] || null,
     summary: summarizeWhaleMoves(
-      moves,
+      limitedMoves,
       symbol,
       Number(options.lookbackHours || DEFAULT_LOOKBACK_HOURS)
     ),
+    assets,
+    warnings: [...new Set(warnings)],
+    unpricedTransfers,
   };
 }
 
 function unavailable(symbol, reason) {
-  const safeReason = String(reason || "Provider unavailable.").replace(
-    /apikey=[^\&\s]+/gi,
-    "apikey=[REDACTED]"
-  );
-
   return {
     status: "unavailable",
     symbol,
+    provider: "PUBLIC_RPC",
     lookbackHours: DEFAULT_LOOKBACK_HOURS,
     minValueUsd: DEFAULT_MIN_VALUE_USD,
     transactions: [],
@@ -321,27 +830,76 @@ function unavailable(symbol, reason) {
     largestMove: null,
     largestToExchange: null,
     largestFromExchange: null,
-    summary: "Whale Alert unavailable: " + safeReason,
-    error: safeReason,
+    summary: "Public on-chain data unavailable: " + String(reason),
+    warnings: [String(reason)],
+    error: String(reason),
   };
 }
 
-function providerError(body) {
-  if (!body || typeof body !== "object") {
-    return "Whale Alert returned an invalid response.";
+async function collectPublicWhaleActivity(symbol, options = {}) {
+  const normalizedSymbol = normalizeSymbol(symbol);
+  const assets = normalizeAssetConfigs(normalizedSymbol);
+
+  if (!normalizedSymbol) {
+    return unavailable("UNKNOWN", "No symbol was provided.");
   }
 
-  if (body.error) {
-    return typeof body.error === "string"
-      ? body.error
-      : body.error.message || JSON.stringify(body.error);
+  if (!assets.length) {
+    return unavailable(
+      normalizedSymbol,
+      "No ONCHAIN_ASSET_REGISTRY entry exists for $" + normalizedSymbol + "."
+    );
   }
 
-  if (body.result === "error" || body.status === "error" || body.success === false) {
-    return body.message || "Whale Alert returned an error response.";
+  const exchangeRegistry = getExchangeRegistry();
+  const moves = [];
+  const warnings = [];
+  let unpricedTransfers = 0;
+
+  for (const asset of assets) {
+    try {
+      const result =
+        asset.chain === "solana"
+          ? await collectSolanaTransfers(
+              asset,
+              normalizedSymbol,
+              options,
+              exchangeRegistry
+            )
+          : await collectEvmTransfers(
+              asset,
+              normalizedSymbol,
+              options,
+              exchangeRegistry
+            );
+
+      moves.push(...result.moves);
+      warnings.push(...(result.warnings || []));
+      unpricedTransfers += Number(result.unpricedTransfers || 0);
+    } catch (error) {
+      warnings.push(asset.chain + ": " + error.message);
+    }
   }
 
-  return null;
+  if (!moves.length && warnings.length && warnings.every((warning) =>
+    /No .*entry|No public RPC|RPC|unavailable|not configured|price/i.test(warning)
+  )) {
+    return {
+      ...unavailable(normalizedSymbol, warnings.join(" ")),
+      assets,
+      warnings: [...new Set(warnings)],
+      unpricedTransfers,
+    };
+  }
+
+  return buildActivity(
+    normalizedSymbol,
+    moves,
+    options,
+    warnings,
+    unpricedTransfers,
+    assets
+  );
 }
 
 async function checkWhaleActivity(symbol, options = {}) {
@@ -356,86 +914,63 @@ async function checkWhaleActivity(symbol, options = {}) {
     1,
     Math.min(100, Number(options.limit || DEFAULT_LIMIT))
   );
-  const endpoint = options.endpoint || DEFAULT_ENDPOINT;
-
-  if (!normalizedSymbol) {
-    return unavailable("UNKNOWN", "No symbol was provided.");
-  }
-
-  if (!process.env.WHALE_ALERT_KEY) {
-    return unavailable(normalizedSymbol, "WHALE_ALERT_KEY is not configured.");
-  }
-
   const cacheKey = [
     normalizedSymbol,
     lookbackHours,
     minValueUsd,
     limit,
-    endpoint,
+    process.env.ONCHAIN_ASSET_REGISTRY || "defaults",
+    process.env.ONCHAIN_EXCHANGE_ADDRESSES || "no-exchange-registry",
   ].join(":");
-  const cached = whaleCache.get(cacheKey);
+  const cached = publicCache.get(cacheKey);
 
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+  if (
+    cached &&
+    Date.now() - cached.timestamp < CACHE_TTL_MS &&
+    cached.data.status !== "unavailable"
+  ) {
     return cached.data;
   }
 
-  whaleCache.delete(cacheKey);
+  publicCache.delete(cacheKey);
 
   try {
-    const response = await axios.get(endpoint, {
-      timeout: 15000,
-      params: {
-        apikey: process.env.WHALE_ALERT_KEY,
-        min_value: minValueUsd,
-        type: "transfer",
-        currency: normalizedSymbol,
-        limit,
-      },
-    });
-
-    const body = response?.data;
-    const error = providerError(body);
-
-    if (error) {
-      throw new Error(error);
-    }
-
-    if (!Array.isArray(body.transactions)) {
-      throw new Error("Whale Alert response did not include transactions.");
-    }
-
-    const moves = normalizeWhaleTransactions(body.transactions, normalizedSymbol, {
+    const activity = await collectPublicWhaleActivity(normalizedSymbol, {
+      ...options,
       lookbackHours,
       minValueUsd,
-    });
-    const activity = buildActivity(normalizedSymbol, moves, {
-      lookbackHours,
-      minValueUsd,
+      limit,
     });
 
-    whaleCache.set(cacheKey, {
-      timestamp: Date.now(),
-      data: activity,
-    });
+    if (activity.status !== "unavailable") {
+      publicCache.set(cacheKey, {
+        timestamp: Date.now(),
+        data: activity,
+      });
+    }
 
     return activity;
   } catch (error) {
-    const message = String(error?.message || error || "Unknown provider error.");
     console.warn(
-      "Whale Alert unavailable for $" + normalizedSymbol + ": " + message
+      "Public on-chain whale scan unavailable for $" +
+        normalizedSymbol +
+        ": " +
+        error.message
     );
-    return unavailable(normalizedSymbol, message);
+    return unavailable(normalizedSymbol, error.message);
   }
 }
 
 function clearWhaleCache() {
-  whaleCache.clear();
+  publicCache.clear();
+  priceCache.clear();
 }
 
 module.exports = {
   checkWhaleActivity,
+  collectPublicWhaleActivity,
+  normalizeAssetConfigs,
   normalizeWhaleTransactions,
-  normalizeTransaction,
   summarizeWhaleMoves,
   formatUsd,
   clearWhaleCache,
