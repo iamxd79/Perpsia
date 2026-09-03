@@ -67,9 +67,6 @@ function buildCMCParams(symbol, venue, params = {}) {
   return {
     symbol: String(symbol).toUpperCase(),
     venue: config.name,
-    exchange_list: config.perpExchanges.join(","),
-    spot_exchange_list: config.spotExchanges.join(","),
-    orderbook_exchange: config.orderbookExchange,
     ...params,
   };
 }
