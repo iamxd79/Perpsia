@@ -50,6 +50,18 @@ function parseToolResult(result) {
     }
   }
 
+  if (parsed?.result?.output && typeof parsed.result.output === "string") {
+    try {
+      parsed = JSON.parse(parsed.result.output);
+    } catch {
+      throw new Error("CMC returned an invalid nested correlation payload.");
+    }
+  }
+
+  if (parsed?.result?.error) {
+    throw new Error("CMC Skill Hub error: " + parsed.result.error);
+  }
+
   if (parsed?.error) {
     throw new Error(
       "CMC Skill Hub error: " +
