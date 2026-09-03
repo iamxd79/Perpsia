@@ -5,6 +5,7 @@
 
 const { executeSkill } = require("./cmcClient");
 const { buildCMCParams, buildPerpAnalysisParams, normalizeVenue } = require("./exchangeAdapter");
+const { analyzeDivergence } = require("./divergence");
 const { RequestQueue } = require("./queue");
 
 const ACTIVE_SIGNAL_SCORE = 70;
@@ -815,6 +816,32 @@ ${mtfText}
     reasons.push(...liquidationFlow.reasons);
   }
 
+  const divergences = analyzeDivergence({
+    priceChange,
+    oiChange,
+    evidence: {
+      perpFlow:
+        bullishPerp && bearishPerp
+          ? "Mixed"
+          : bullishPerp
+          ? "Bullish"
+          : bearishPerp
+          ? "Bearish"
+          : "Neutral",
+      fundingState: deeplyNegativeFunding
+        ? "Negative / Short-Squeeze Fuel"
+        : elevatedFunding
+        ? "Elevated / Long-Crowding Risk"
+        : "Normal",
+    },
+  });
+
+  score += divergences.reduce(
+    (total, divergence) => total + divergence.scoreAdjust,
+    0
+  );
+  reasons.push(...divergences.map((divergence) => divergence.message));
+
   score = Math.max(0, Math.min(100, score));
 
   if (!hasCoreData) {
@@ -924,6 +951,7 @@ ${mtfText}
 
     conflicts,
     liquidationFlow,
+    divergences,
 
     price,
     priceChange,
