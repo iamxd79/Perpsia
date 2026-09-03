@@ -1,4 +1,4 @@
-const { runMarketScan } = require("./scanner");
+const { runMarketScan } = require("./scannerV2");
 
 const {
   getLastAssetState,
@@ -95,7 +95,7 @@ Booting scheduled market intelligence scan...`
   );
 
   try {
-    const result = await runMarketScan(async (progress) => {
+    const result = await runMarketScan("Binance", async (progress) => {
       await safeEditMessage(
         bot,
         chatId,
