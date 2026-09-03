@@ -32,8 +32,8 @@ db.exec([
   "pnl_percent REAL,",
   "created_at TEXT DEFAULT CURRENT_TIMESTAMP,",
   "settled_at TEXT",
-  ")",
-  "CREATE INDEX IF NOT EXISTS idx_performance_signal_time ON performance_signals(signal_time)",
+  ");",
+  "CREATE INDEX IF NOT EXISTS idx_performance_signal_time ON performance_signals(signal_time);",
   "CREATE INDEX IF NOT EXISTS idx_performance_signal_status ON performance_signals(status)",
 ].join(String.fromCharCode(10)));
 
