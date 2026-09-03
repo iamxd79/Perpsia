@@ -3380,7 +3380,7 @@ ${mtfText}
     whaleActivity,
     correlation,
     divergences,
-    marketEvidence,
+    marketEvidence: Array.isArray(packs.marketEvidence) ? packs.marketEvidence : [],
     crossSource,
 
 
