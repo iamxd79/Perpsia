@@ -144,6 +144,26 @@ async function safeEditMessage(chatId, messageId, text) {
 // FORMAT SCAN RESULT (v2)
 // ==========================================
 
+function formatLiquidationFlow(flow) {
+  if (!flow || flow.status !== "available") return "";
+
+  const risk = String(flow.cascadeRisk || "NONE").replaceAll("_", " ");
+  const lines = [
+    "🔥 LIQUIDATION FLOW",
+    "Risk: " + risk,
+  ];
+
+  if (Array.isArray(flow.reasons) && flow.reasons.length) {
+    lines.push(...flow.reasons.slice(0, 3).map((reason) => "• " + reason));
+  }
+
+  if (Array.isArray(flow.recentLiqs) && flow.recentLiqs.length) {
+    lines.push("Recent liquidation events: " + flow.recentLiqs.length);
+  }
+
+  return lines.join(String.fromCharCode(10));
+}
+
 function formatScanResult(result) {
   const total =
     result.longs.length +
@@ -181,6 +201,34 @@ Assets analyzed: ${total}
     output += `\n👀 WATCHLIST\n\n`;
     result.watchlist.slice(0, 5).forEach((signal) => {
       output += `$${signal.symbol} — ${signal.score}/100\nMarket State: ${signal.marketState}\n\n`;
+    });
+  }
+
+  const liquidationSignals = [
+    ...result.longs,
+    ...result.shorts,
+    ...result.watchlist,
+    ...result.neutral,
+  ].filter(
+    (signal) =>
+      signal.liquidationFlow?.status === "available" &&
+      signal.liquidationFlow.cascadeRisk !== "NONE"
+  );
+
+  if (liquidationSignals.length > 0) {
+    output += "\n🔥 LIQUIDATION FLOW\n\n";
+
+    liquidationSignals.slice(0, 5).forEach((signal) => {
+      const flow = signal.liquidationFlow;
+      const reason = flow.reasons?.[0] || "Directional liquidation risk detected.";
+      output +=
+        "$" +
+        signal.symbol +
+        " — " +
+        String(flow.cascadeRisk).replaceAll("_", " ") +
+        "\n" +
+        reason +
+        "\n\n";
     });
   }
 
@@ -742,6 +790,8 @@ ${result.confirmationNeeded.map((item) => `• ${item}`).join("\n")}`;
     // ADD LIFECYCLE, DECAY, COUNTER-THESIS
     // ======================================
 
+    const liquidationText = formatLiquidationFlow(result.liquidationFlow);
+
     const lifecycleText = formatLifecycleUpdate(lifecycle);
     const decayText = formatSignalDecay(decay);
     const counterText = formatCounterThesis(counterThesis);
@@ -770,6 +820,7 @@ Set your profile with:
 
     const finalMessage = [
       report,
+      liquidationText,
       lifecycleText,
       decayText,
       counterText,
