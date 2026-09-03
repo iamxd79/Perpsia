@@ -3,7 +3,7 @@
 // ==========================================
 // Canonical venue registry used by scanner commands and CMC Skill Hub calls.
 // Exchange lists are metadata only: CMC skill schemas must receive "venue",
-// not exchange_list/spot_exchange_list/orderbook_exchange fields.
+// not venue fields on skills whose schemas require exchange lists.
 
 const DEFAULT_VENUE = "Binance";
 
@@ -116,6 +116,37 @@ function buildCMCParams(symbol, venue = DEFAULT_VENUE, params = {}) {
   };
 }
 
+/**
+ * Build schema-safe parameters for perp_contract_analysis.
+ *
+ * This skill accepts exchange_list and spot_exchange_list, not venue.
+ */
+function buildPerpAnalysisParams(symbol, venue = DEFAULT_VENUE, params = {}) {
+  const config = getExchangeConfig(venue);
+  const safeParams = {
+    ...(params && typeof params === "object" && !Array.isArray(params) ? params : {}),
+  };
+
+  for (const forbiddenKey of [
+    "venue",
+    "exchange_list",
+    "spot_exchange_list",
+    "orderbook_exchange",
+    "spotExchanges",
+    "perpExchanges",
+    "orderbookExchange",
+  ]) {
+    delete safeParams[forbiddenKey];
+  }
+
+  return {
+    ...safeParams,
+    symbol: String(symbol).trim().replace("$", "").toUpperCase(),
+    exchange_list: config.perp_exchanges.join(","),
+    spot_exchange_list: config.spot_exchanges.join(","),
+  };
+}
+
 function listSupportedExchanges() {
   return Object.keys(exchangeConfigs).map((key) => {
     const config = exchangeConfigs[key];
@@ -143,6 +174,7 @@ module.exports = {
   normalizeVenue,
   getExchangeConfig,
   buildCMCParams,
+  buildPerpAnalysisParams,
   listSupportedExchanges,
   isExchangeSupported,
 };
