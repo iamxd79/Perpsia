@@ -2,6 +2,8 @@ const { runMarketScan } = require("./scannerV2");
 const { normalizeVenue } = require("./exchangeAdapter");
 
 
+
+
 const {
   getLastAssetState,
   saveAssetState,
@@ -9,7 +11,11 @@ const {
 } = require("./memory");
 
 
+
+
 const { getLifecycleStage } = require("./lifecycle");
+
+
 
 
 const {
@@ -18,14 +24,19 @@ const {
 } = require("./alertEngine");
 
 
+
+
 const {
   lockScan,
   unlockScan,
 } = require("./scanLock");
 
 
+
+
 const {
   recordSignal: recordPerformanceSignal,
+  evaluateSignalOutcomes,
 } = require("./performance");
 const {
   recordSignal: recordTelemetrySignal,
@@ -34,9 +45,14 @@ const {
 
 
 
+
+
+
 function getNow() {
   return new Date().toISOString();
 }
+
+
 
 
 function progressBar(percent) {
@@ -44,6 +60,8 @@ function progressBar(percent) {
   const filled = Math.round((percent / 100) * total);
   return "█".repeat(filled) + "░".repeat(total - filled);
 }
+
+
 
 
 async function safeEditMessage(bot, chatId, messageId, text) {
@@ -58,6 +76,8 @@ async function safeEditMessage(bot, chatId, messageId, text) {
 }
 
 
+
+
 function flattenScanResults(result) {
   return [
     ...result.longs,
@@ -68,12 +88,16 @@ function flattenScanResults(result) {
 }
 
 
+
+
 function formatSilentReport(result, alertCount) {
   const total =
     result.longs.length +
     result.shorts.length +
     result.watchlist.length +
     result.neutral.length;
+
+
 
 
   return `🤖 PERPSIA 4H SCAN COMPLETE
@@ -94,6 +118,8 @@ Perpsia will keep monitoring.`;
 }
 
 
+
+
 async function runScheduledScan({ bot, chatId, venue }) {
   if (!chatId) {
     console.log("Scheduler skipped: TELEGRAM_CHAT_ID is missing.");
@@ -101,9 +127,13 @@ async function runScheduledScan({ bot, chatId, venue }) {
   }
 
 
+
+
   const selectedVenue = normalizeVenue(
     venue || process.env.PERPSIA_DEFAULT_VENUE || "Binance"
   );
+
+
 
 
   if (!lockScan()) {
@@ -112,7 +142,11 @@ async function runScheduledScan({ bot, chatId, venue }) {
   }
 
 
+
+
   console.log(`[${getNow()}] Scheduled scan started.`);
+
+
 
 
   const loading = await bot.sendMessage(
@@ -123,6 +157,8 @@ ${progressBar(5)} 5%
 
 Booting scheduled market intelligence scan...`
   );
+
+
 
 
   try {
@@ -143,6 +179,8 @@ ${progress.stage}`
     });
 
 
+
+
     await safeEditMessage(
       bot,
       chatId,
@@ -155,19 +193,29 @@ Checking memory and alert conditions...`
     );
 
 
+
+
     const allSignals = flattenScanResults(result);
     let alertCount = 0;
+
+
 
 
     for (const signal of allSignals) {
       const previous = getLastAssetState(signal.symbol);
 
 
+
+
       const lifecycle = getLifecycleStage(signal, previous);
       signal.lifecycleStage = lifecycle.stage;
 
 
+
+
       const alertDecision = shouldSendAlert(signal, previous);
+
+
 
 
       saveAssetState(signal);
@@ -175,33 +223,53 @@ Checking memory and alert conditions...`
       recordPerformanceSignal(signal, "scheduled_scan");
 
 
+
+
       if (!alertDecision.shouldAlert) continue;
+
+
 
 
       const alertMessage = formatSmartAlert(signal, alertDecision);
 
 
+
+
       await bot.sendMessage(chatId, alertMessage);
 
 
+
+
       saveAlert(signal.symbol, alertDecision.alertType, alertMessage);
+
+
 
 
       alertCount++;
     }
 
 
+
+
     recordScan("scheduled", "success");
+
 
     if (alertCount === 0) {
       await bot.sendMessage(chatId, formatSilentReport(result, alertCount));
     }
 
 
+
+
+    const qualityEvaluation = await evaluateSignalOutcomes({ limit: 100 });
+    console.log(`[${getNow()}] Signal quality evaluation completed. Evaluated: ${qualityEvaluation.evaluated}, pending: ${qualityEvaluation.pending}, errors: ${qualityEvaluation.errors.length}`);
+
     console.log(`[${getNow()}] Scheduled scan completed. Alerts: ${alertCount}`);
   } catch (error) {
     console.error("Scheduled scan failed:", error);
     recordScan("scheduled", "error");
+
+
 
 
     await safeEditMessage(
@@ -219,10 +287,14 @@ ${error.message}`
 }
 
 
+
+
 function startScheduler({ bot, chatId, intervalMs = 4 * 60 * 60 * 1000, venue }) {
   if (!bot) {
     throw new Error("Scheduler requires bot instance.");
   }
+
+
 
 
   if (!chatId) {
@@ -231,13 +303,19 @@ function startScheduler({ bot, chatId, intervalMs = 4 * 60 * 60 * 1000, venue })
   }
 
 
+
+
   console.log(`Perpsia smart alert scheduler started. Interval: ${intervalMs}ms`);
+
+
 
 
   setInterval(() => {
     runScheduledScan({ bot, chatId, venue });
   }, intervalMs);
 }
+
+
 
 
 module.exports = {
