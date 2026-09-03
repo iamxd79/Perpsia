@@ -1651,6 +1651,7 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
 
   const symbols = [];
   let inPrimarySection = false;
+  let tableHeaders = null;
 
 
 
@@ -1688,6 +1689,7 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
 
     if (lower.includes("primary ranked candidates") || lower.includes("ranked primary candidates") || lower.includes("ranked candidates")) {
       inPrimarySection = true;
+      tableHeaders = null;
       continue;
     }
 
@@ -1708,6 +1710,7 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
 
     if (inPrimarySection && line.startsWith("###")) {
       inPrimarySection = false;
+      tableHeaders = null;
       continue;
     }
 
@@ -1742,6 +1745,25 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
 
 
 
+
+    if (line.startsWith("|")) {
+      const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
+      const normalizedCells = cells.map(normalizeKey);
+      const isHeader = normalizedCells.some((key) => ["token", "symbol", "ticker", "assetsymbol", "basesymbol"].includes(key));
+      if (!tableHeaders && isHeader) {
+        tableHeaders = normalizedCells;
+        continue;
+      }
+      if (tableHeaders && cells.length && cells.every((cell) => cell.replaceAll("-", "").trim() === "")) {
+        continue;
+      }
+      if (tableHeaders) {
+        const symbolIndex = tableHeaders.findIndex((key) => ["token", "symbol", "ticker", "assetsymbol", "basesymbol"].includes(key));
+        const symbol = symbolIndex >= 0 ? coerceSymbol(cells[symbolIndex]) : null;
+        if (symbol && !blacklist.has(symbol)) symbols.push(symbol);
+        continue;
+      }
+    }
 
     const dot = line.indexOf(".");
     if (dot <= 0 || !Number.isInteger(Number(line.slice(0, dot).trim()))) {
