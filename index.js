@@ -225,6 +225,42 @@ function formatWhaleActivity(activity) {
 }
 
 
+function formatCorrelationReport(correlation) {
+  if (!correlation || correlation.status !== "available") return "";
+
+  const formatPairs = (pairs) =>
+    (Array.isArray(pairs) ? pairs : [])
+      .slice(0, 4)
+      .map(
+        (pair) =>
+          String(pair.symbol || "ASSET") +
+          " (" +
+          Number(pair.correlation || 0).toFixed(2) +
+          ")"
+      )
+      .join(", ");
+
+  const lines = [
+    "🧭 CORRELATION ANALYSIS",
+    correlation.rationale || "Cross-asset context available.",
+  ];
+
+  if (correlation.supportive?.length) {
+    lines.push("Supportive: " + formatPairs(correlation.supportive));
+  }
+
+  if (correlation.headwinds?.length) {
+    lines.push("Headwinds: " + formatPairs(correlation.headwinds));
+  }
+
+  if (correlation.freshnessNote) {
+    lines.push("Data window: " + correlation.freshnessNote);
+  }
+
+  return lines.join(String.fromCharCode(10));
+}
+
+
 function formatScanResult(result) {
   const total =
     result.longs.length +
@@ -342,6 +378,63 @@ Assets analyzed: ${total}
 
       if (activity.volumeFromExchanges > 0) {
         output += "From exchanges: $" + formatUsd(activity.volumeFromExchanges) + "\n";
+      }
+
+      output += "\n";
+    });
+  }
+
+
+  const correlationSignals = [
+    ...result.longs,
+    ...result.shorts,
+    ...result.watchlist,
+    ...result.neutral,
+  ].filter(
+    (signal) =>
+      signal.correlation?.status === "available" &&
+      signal.correlation.pairs?.length
+  );
+
+  if (correlationSignals.length > 0) {
+    output += "\n🧭 CORRELATION CONTEXT\n\n";
+
+    correlationSignals.slice(0, 5).forEach((signal) => {
+      const correlation = signal.correlation;
+      output += "$" + signal.symbol + "\n";
+      output +=
+        (correlation.rationale || "Cross-asset context available.") + "\n";
+
+      if (correlation.supportive?.length) {
+        output +=
+          "Supportive links: " +
+          correlation.supportive
+            .slice(0, 4)
+            .map(
+              (pair) =>
+                String(pair.symbol) +
+                " (" +
+                Number(pair.correlation || 0).toFixed(2) +
+                ")"
+            )
+            .join(", ") +
+          "\n";
+      }
+
+      if (correlation.headwinds?.length) {
+        output +=
+          "Headwind links: " +
+          correlation.headwinds
+            .slice(0, 4)
+            .map(
+              (pair) =>
+                String(pair.symbol) +
+                " (" +
+                Number(pair.correlation || 0).toFixed(2) +
+                ")"
+            )
+            .join(", ") +
+          "\n";
       }
 
       output += "\n";
@@ -910,6 +1003,7 @@ ${result.confirmationNeeded.map((item) => `• ${item}`).join("\n")}`;
 
     const liquidationText = formatLiquidationFlow(result.liquidationFlow);
     const whaleText = formatWhaleActivity(result.whaleActivity);
+    const correlationText = formatCorrelationReport(result.correlation);
 
     const lifecycleText = formatLifecycleUpdate(lifecycle);
     const decayText = formatSignalDecay(decay);
@@ -942,6 +1036,7 @@ Set your profile with:
       divergenceText,
       liquidationText,
       whaleText,
+      correlationText,
       lifecycleText,
       decayText,
       counterText,
@@ -1149,7 +1244,8 @@ Lifecycle: Active
 Smart Alerts: Active
 Multi-Exchange: Active
 Request Queue: Active
-Public On-chain Whales: ${process.env.ONCHAIN_ASSET_REGISTRY ? "CONFIGURED" : "DEFAULT ASSETS"}`
+Public On-chain Whales: ${process.env.ONCHAIN_ASSET_REGISTRY ? "CONFIGURED" : "DEFAULT ASSETS"}
+Correlation Analysis: Active`
       );
     }
 
@@ -1257,6 +1353,7 @@ Risk Engine: ACTIVE
 Request Queue: ACTIVE
 Multi-Exchange Support: ACTIVE
 Public On-chain Whales: ${process.env.ONCHAIN_ASSET_REGISTRY ? "CONFIGURED" : "DEFAULT ASSETS"}
+Correlation Analysis: Active
 4H Autonomous Scheduler: ${schedulerStatus}`
   );
 });
@@ -1300,6 +1397,7 @@ http
           "request-queue",
           "backtester-ready",
           "public-onchain-whales",
+          "correlation-analysis",
         ],
       })
     );
