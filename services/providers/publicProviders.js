@@ -31,6 +31,38 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 const axios = require("axios");
 const {
   collectProviders,
@@ -41,6 +73,38 @@ const {
 } = require("./registry");
 const { listPublicStreams } = require("./streams");
 const { normalizeEvidence } = require("./evidence");
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -85,6 +149,39 @@ const FRED = "https://api.stlouisfed.org";
 const GOPLUS = "https://api.gopluslabs.io";
 const HONEYPOT = "https://api.honeypot.is";
 const GITHUB = "https://api.github.com";
+const liquiditySnapshots = new Map();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -122,6 +219,38 @@ function number(value) {
   const result = Number(value);
   return Number.isFinite(result) ? result : null;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -195,9 +324,73 @@ function normalizeAssetSymbol(raw) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function asUsdtSymbol(raw) {
   return normalizeAssetSymbol(raw) + "USDT";
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -265,9 +458,73 @@ function asOkxSwap(raw) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function asOkxSpot(raw) {
   return normalizeAssetSymbol(raw) + "-USDT";
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -348,6 +605,38 @@ function depthSummary(book) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function bybitDepthSummary(book) {
   return depthSummary({
     bids: book?.b || [],
@@ -386,12 +675,76 @@ function bybitDepthSummary(book) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function okxDepthSummary(book) {
   return depthSummary({
     bids: book?.bids || [],
     asks: book?.asks || [],
   });
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -463,9 +816,73 @@ function hyperliquidDepthSummary(book) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function responseData(response) {
   return response?.data ?? response;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -506,6 +923,38 @@ async function getJson(url, options = {}) {
   });
   return responseData(response);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -580,9 +1029,73 @@ async function postJson(url, body, options = {}) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function settledValue(result) {
   return result?.status === "fulfilled" ? result.value : null;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -619,6 +1132,38 @@ function evidenceStatus(price, availableCount) {
   if (availableCount === 0) throw new Error("provider returned no usable response");
   return price === null ? "degraded" : "ok";
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -724,6 +1269,38 @@ async function fetchBinance(symbol, options = {}) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 async function fetchBybit(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
   const pair = asUsdtSymbol(asset);
@@ -776,6 +1353,38 @@ async function fetchBybit(symbol, options = {}) {
     },
   };
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -897,6 +1506,38 @@ async function fetchOkx(symbol, options = {}) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 async function fetchHyperliquid(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
   const [metaResponse, bookResponse] = await Promise.all([
@@ -966,12 +1607,76 @@ async function fetchHyperliquid(symbol, options = {}) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function pairScore(pair, asset) {
   const base = String(pair?.baseToken?.symbol || "").toUpperCase();
   const quote = String(pair?.quoteToken?.symbol || "").toUpperCase();
   const exact = base === asset ? 1000000000 : quote === asset ? 500000000 : 0;
   return exact + (number(pair?.liquidity?.usd) || 0) + (number(pair?.volume?.h24) || 0);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1071,6 +1776,38 @@ function dexPairEvidence(pair, provider, asset) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 async function fetchDexScreener(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
   const body = await getJson(DEXSCREENER + "/latest/dex/search", {
@@ -1088,6 +1825,38 @@ async function fetchDexScreener(symbol, options = {}) {
   if (!pairs.length) throw new Error("no matching DEX pairs found");
   return pairs.map((pair) => dexPairEvidence(pair, "dexscreener", asset));
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1197,6 +1966,38 @@ async function fetchGeckoTerminal(symbol, options = {}) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 async function fetchAlternative(symbol, options = {}) {
   const body = await getJson(ALTERNATIVE + "/fng/?limit=2", options);
   const current = Array.isArray(body?.data) ? body.data[0] : null;
@@ -1218,6 +2019,38 @@ async function fetchAlternative(symbol, options = {}) {
     },
   };
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1312,9 +2145,73 @@ async function fetchFred(symbol, options = {}) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function resolveContract(options = {}) {
   return options.contractAddress || process.env.PERPSIA_TOKEN_CONTRACT || null;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1415,6 +2312,38 @@ async function fetchGoPlus(symbol, options = {}) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 async function fetchHoneypot(symbol, options = {}) {
   const address = resolveContract(options);
   if (!address) throw new Error("token contract address is not configured");
@@ -1475,10 +2404,74 @@ async function fetchHoneypot(symbol, options = {}) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function parseGithubRepository(value) {
   const match = String(value || "").match(/github[.]com[/:]([^/]+)[/]([^/#]+?)(?:[.]git)?$/i);
   return match ? { owner: match[1], repo: match[2] } : null;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1584,6 +2577,38 @@ async function fetchGithub(symbol, options = {}) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 registerProvider({
   id: "binance",
   name: "Binance",
@@ -1594,6 +2619,38 @@ registerProvider({
   cacheTtlMs: 15000,
   collect: fetchBinance,
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1668,6 +2725,38 @@ registerProvider({
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 registerProvider({
   id: "okx",
   name: "OKX",
@@ -1678,6 +2767,38 @@ registerProvider({
   cacheTtlMs: 15000,
   collect: fetchOkx,
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1752,6 +2873,38 @@ registerProvider({
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 registerProvider({
   id: "dexscreener",
   name: "DexScreener",
@@ -1762,6 +2915,38 @@ registerProvider({
   cacheTtlMs: 60000,
   collect: fetchDexScreener,
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1836,6 +3021,38 @@ registerProvider({
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 registerProvider({
   id: "alternative",
   name: "Alternative.me Fear & Greed",
@@ -1846,6 +3063,38 @@ registerProvider({
   cacheTtlMs: 300000,
   collect: fetchAlternative,
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1920,6 +3169,38 @@ registerProvider({
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 registerProvider({
   id: "goplus",
   name: "GoPlus Security",
@@ -1930,6 +3211,38 @@ registerProvider({
   cacheTtlMs: 900000,
   collect: fetchGoPlus,
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2004,6 +3317,38 @@ registerProvider({
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 registerProvider({
   id: "github",
   name: "GitHub public API",
@@ -2014,6 +3359,38 @@ registerProvider({
   cacheTtlMs: 900000,
   collect: fetchGithub,
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2092,6 +3469,38 @@ function defaultProviderIds(options = {}) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 function getProviderCatalog() {
   const streams = new Map(listPublicStreams().map((item) => [item.provider, item]));
   return getProviderDefinitions().map((definition) => ({
@@ -2099,6 +3508,8 @@ function getProviderCatalog() {
     stream: streams.get(definition.id) || null,
   }));
 }
+
+
 
 
 async function collectMarketEvidence(symbol, options = {}) {
@@ -2121,7 +3532,19 @@ async function collectMarketEvidence(symbol, options = {}) {
         },
       })
     : null;
-  const allRecords = cmcEvidence ? [cmcEvidence, ...records] : records;
+  const enrichedRecords = records.map((record) => {
+    const pairAddress = record.metadata?.pairAddress || record.metadata?.poolAddress;
+    if (record.liquidity === null || !pairAddress) return record;
+    const snapshotKey = record.provider + ":" + pairAddress;
+    const previous = liquiditySnapshots.get(snapshotKey);
+    const metadata = { ...record.metadata };
+    if (previous !== undefined && previous > 0) {
+      metadata.liquidityChangePct = ((record.liquidity - previous) / previous) * 100;
+    }
+    liquiditySnapshots.set(snapshotKey, record.liquidity);
+    return { ...record, metadata };
+  });
+  const allRecords = cmcEvidence ? [cmcEvidence, ...enrichedRecords] : enrichedRecords;
   return {
     records: allRecords,
     summary: getEvidenceSummary(allRecords),
@@ -2134,6 +3557,38 @@ async function collectMarketEvidence(symbol, options = {}) {
     })),
   };
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
