@@ -1,22 +1,21 @@
-const Database = require("better-sqlite3");
-const path = require("path");
+const { openDatabase, getStorageInfo } = require("./database");
+
 
 // ==========================================
 // PERPSIA MEMORY ENGINE
 // ==========================================
 
-const configuredDbPath = process.env.PERPSIA_DB_PATH;
-const dbPath = configuredDbPath
-  ? path.resolve(configuredDbPath)
-  : path.join(__dirname, "..", "perpsia.db");
-const storageIsPersistent = Boolean(configuredDbPath || process.env.RENDER_DISK_PATH);
-const db = new Database(dbPath);
+
+const db = openDatabase();
+
 
 db.pragma("journal_mode = WAL");
+
 
 // ==========================================
 // TABLES
 // ==========================================
+
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS asset_states (
@@ -52,6 +51,7 @@ db.exec(`
   );
 `);
 
+
 // Migration for older database
 try {
   db.prepare(`
@@ -60,9 +60,11 @@ try {
   `).run();
 } catch {}
 
+
 // ==========================================
 // ASSET STATE
 // ==========================================
+
 
 function saveAssetState(signal) {
   const stmt = db.prepare(`
@@ -81,6 +83,7 @@ function saveAssetState(signal) {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
+
   return stmt.run(
     signal.symbol.toUpperCase(),
     signal.marketState,
@@ -96,6 +99,7 @@ function saveAssetState(signal) {
   );
 }
 
+
 function getLastAssetState(symbol) {
   return db
     .prepare(`
@@ -107,6 +111,7 @@ function getLastAssetState(symbol) {
     `)
     .get(symbol.toUpperCase());
 }
+
 
 function getAssetHistory(symbol, limit = 10) {
   return db
@@ -120,6 +125,7 @@ function getAssetHistory(symbol, limit = 10) {
     .all(symbol.toUpperCase(), limit);
 }
 
+
 function compareAssetState(previous, current) {
   if (!previous) {
     return {
@@ -130,27 +136,34 @@ function compareAssetState(previous, current) {
     };
   }
 
+
   const changes = [];
+
 
   if (previous.market_state !== current.marketState) {
     changes.push(`Market State: ${previous.market_state} → ${current.marketState}`);
   }
 
+
   if (previous.category !== current.category) {
     changes.push(`Category: ${previous.category} → ${current.category}`);
   }
+
 
   if (previous.direction !== current.direction) {
     changes.push(`Direction: ${previous.direction} → ${current.direction}`);
   }
 
+
   if (previous.lifecycle_stage !== current.lifecycleStage) {
     changes.push(`Lifecycle: ${previous.lifecycle_stage || "NONE"} → ${current.lifecycleStage}`);
   }
 
+
   const previousScore = Number(previous.score);
   const currentScore = Number(current.score);
   const scoreDiff = currentScore - previousScore;
+
 
   if (scoreDiff !== 0) {
     changes.push(
@@ -158,23 +171,28 @@ function compareAssetState(previous, current) {
     );
   }
 
+
   if (previous.price !== null && current.price !== null) {
     const priceDifference = current.price - previous.price;
     const pricePercentChange =
       previous.price !== 0 ? ((priceDifference / previous.price) * 100).toFixed(2) : 0;
+
 
     if (Math.abs(Number(pricePercentChange)) >= 2) {
       changes.push(`Price moved ${pricePercentChange}% since previous analysis`);
     }
   }
 
+
   if (previous.oi_change !== null && current.oiChange !== null) {
     const oiDifference = current.oiChange - previous.oi_change;
+
 
     if (Math.abs(oiDifference) >= 10) {
       changes.push(`OI momentum changed by ${oiDifference.toFixed(2)} percentage points`);
     }
   }
+
 
   return {
     isNew: false,
@@ -186,9 +204,11 @@ function compareAssetState(previous, current) {
   };
 }
 
+
 // ==========================================
 // ALERTS
 // ==========================================
+
 
 function saveAlert(symbol, alertType, message) {
   return db
@@ -202,6 +222,7 @@ function saveAlert(symbol, alertType, message) {
     .run(symbol.toUpperCase(), alertType, message);
 }
 
+
 function getLastAlert(symbol) {
   return db
     .prepare(`
@@ -214,9 +235,11 @@ function getLastAlert(symbol) {
     .get(symbol.toUpperCase());
 }
 
+
 // ==========================================
 // RISK SETTINGS
 // ==========================================
+
 
 function saveRiskSettings(chatId, capital, riskPercent, maxLeverage) {
   return db
@@ -239,6 +262,7 @@ function saveRiskSettings(chatId, capital, riskPercent, maxLeverage) {
     .run(String(chatId), capital, riskPercent, maxLeverage);
 }
 
+
 function getRiskSettings(chatId) {
   return db
     .prepare(`
@@ -249,37 +273,32 @@ function getRiskSettings(chatId) {
     .get(String(chatId));
 }
 
+
 // ==========================================
 // STATS
 // ==========================================
+
 
 function getMemoryStats() {
   const totalStates = db
     .prepare(`SELECT COUNT(*) AS count FROM asset_states`)
     .get().count;
 
+
   const trackedAssets = db
     .prepare(`SELECT COUNT(DISTINCT symbol) AS count FROM asset_states`)
     .get().count;
+
 
   const totalAlerts = db
     .prepare(`SELECT COUNT(*) AS count FROM alerts`)
     .get().count;
 
+
   return {
     totalStates,
     trackedAssets,
     totalAlerts,
-  };
-}
-
-function getStorageInfo() {
-  return {
-    backend: "sqlite",
-    persistent: storageIsPersistent,
-    warning: storageIsPersistent
-      ? null
-      : "SQLite is using the ephemeral service filesystem; set PERPSIA_DB_PATH to a mounted persistent disk path.",
   };
 }
 
