@@ -2,8 +2,10 @@
 // PERPSIA PAPER TRADING BACKTESTER
 // ==========================================
 
+
 const axios = require("axios");
 const { classifyCandidate } = require("./scannerV2");
+
 
 const MAX_KLINE_LIMIT = 1500;
 const FUNDING_LIMIT = 1000;
@@ -12,25 +14,31 @@ const DEFAULT_INTERVAL = "4h";
 const DEFAULT_LOOKBACK_DAYS = 90;
 const MAX_LOOKBACK_DAYS = 365;
 
+
 function toFiniteNumber(value) {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
   }
 
+
   if (value === null || value === undefined || value === "") return null;
+
 
   const parsed = Number.parseFloat(String(value).replace(/,/g, "").trim());
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+
 function normalizeSymbol(symbol) {
   const normalized = String(symbol || "")
     .trim()
-    .replace(/^$/, "")
+    .replace(/^\$/, "")
     .toUpperCase();
+
 
   return normalized.endsWith("USDT") ? normalized : normalized + "USDT";
 }
+
 
 function parseTimestamp(value, label) {
   if (value instanceof Date) {
@@ -38,16 +46,20 @@ function parseTimestamp(value, label) {
     if (Number.isFinite(time)) return time;
   }
 
+
   if (typeof value === "number") {
     const milliseconds = value < 100000000000 ? value * 1000 : value;
     if (Number.isFinite(milliseconds)) return milliseconds;
   }
 
+
   const parsed = Date.parse(String(value || ""));
   if (Number.isFinite(parsed)) return parsed;
 
+
   throw new Error("Invalid " + label + ": " + String(value));
 }
+
 
 function intervalToMs(interval) {
   const intervals = {
@@ -65,28 +77,35 @@ function intervalToMs(interval) {
     "1d": 24 * 60 * 60 * 1000,
   };
 
+
   return intervals[interval] || intervals[DEFAULT_INTERVAL];
 }
+
 
 function percentChange(current, previous) {
   if (current === null || previous === null || previous === 0) return null;
   return ((current - previous) / Math.abs(previous)) * 100;
 }
 
+
 function round(value, digits = 4) {
   return Number(Number(value || 0).toFixed(digits));
 }
 
+
 function latestAtOrBefore(rows, timestamp) {
   if (!Array.isArray(rows) || rows.length === 0) return null;
+
 
   let low = 0;
   let high = rows.length - 1;
   let result = null;
 
+
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
     const row = rows[middle];
+
 
     if (row.timestamp <= timestamp) {
       result = row;
@@ -96,37 +115,46 @@ function latestAtOrBefore(rows, timestamp) {
     }
   }
 
+
   return result;
 }
+
 
 function minPast(candles, index, field, count) {
   const values = [];
   const start = Math.max(0, index - count);
 
+
   for (let cursor = start; cursor < index; cursor++) {
     const value = toFiniteNumber(candles[cursor]?.[field]);
     if (value !== null) values.push(value);
   }
 
+
   return values.length ? Math.min(...values) : null;
 }
+
 
 function maxPast(candles, index, field, count) {
   const values = [];
   const start = Math.max(0, index - count);
 
+
   for (let cursor = start; cursor < index; cursor++) {
     const value = toFiniteNumber(candles[cursor]?.[field]);
     if (value !== null) values.push(value);
   }
 
+
   return values.length ? Math.max(...values) : null;
 }
+
 
 function extractNumbers(value) {
   const text = String(value || "");
   const numbers = [];
   let buffer = "";
+
 
   const flush = () => {
     if (!buffer || buffer === "-" || buffer === ".") {
@@ -134,15 +162,18 @@ function extractNumbers(value) {
       return;
     }
 
+
     const parsed = Number(buffer);
     if (Number.isFinite(parsed)) numbers.push(parsed);
     buffer = "";
   };
 
+
   for (const character of text) {
     const isDigit = character >= "0" && character <= "9";
     const isDot = character === ".";
     const isMinus = character === "-" && buffer.length === 0;
+
 
     if (isDigit || isDot || isMinus) {
       buffer += character;
@@ -151,9 +182,11 @@ function extractNumbers(value) {
     }
   }
 
+
   flush();
   return numbers;
 }
+
 
 function normalizeDirection(direction) {
   const value = String(direction || "").toLowerCase();
@@ -162,12 +195,14 @@ function normalizeDirection(direction) {
   return null;
 }
 
+
 function calculatePnlPercent(direction, entryPrice, exitPrice) {
   if (!entryPrice || !exitPrice) return 0;
   return direction === "short"
     ? ((entryPrice - exitPrice) / entryPrice) * 100
     : ((exitPrice - entryPrice) / entryPrice) * 100;
 }
+
 
 function emptyStats() {
   return {
@@ -183,8 +218,10 @@ function emptyStats() {
     totalReturn: 0,
     grossProfit: 0,
     grossLoss: 0,
+    openTrades: 0,
   };
 }
+
 
 class Backtester {
   constructor(options = {}) {
@@ -195,6 +232,7 @@ class Backtester {
     this.maxLookbackDays = options.maxLookbackDays || MAX_LOOKBACK_DAYS;
     this.signalAnalyzer = options.signalAnalyzer || null;
   }
+
 
   async getHistoricalCandles(
     symbol,
@@ -211,6 +249,7 @@ class Backtester {
     let cursor = startTime;
     let remaining = hasRange ? Number.POSITIVE_INFINITY : boundedLimit;
 
+
     while (hasRange ? cursor <= endTime : remaining > 0) {
       const requestLimit = hasRange ? MAX_KLINE_LIMIT : Math.min(remaining, MAX_KLINE_LIMIT);
       const params = {
@@ -219,10 +258,12 @@ class Backtester {
         limit: requestLimit,
       };
 
+
       if (hasRange) {
         params.startTime = cursor;
         params.endTime = endTime;
       }
+
 
       const response = await this.httpClient.get(
         this.futuresBaseUrl + "/fapi/v1/klines",
@@ -230,12 +271,14 @@ class Backtester {
       );
       const rows = Array.isArray(response.data) ? response.data : [];
 
+
       for (const row of rows) {
         const timestamp = toFiniteNumber(row?.[0]);
         const open = toFiniteNumber(row?.[1]);
         const high = toFiniteNumber(row?.[2]);
         const low = toFiniteNumber(row?.[3]);
         const close = toFiniteNumber(row?.[4]);
+
 
         if ([timestamp, open, high, low, close].every((value) => value !== null)) {
           candles.push({
@@ -249,24 +292,30 @@ class Backtester {
         }
       }
 
+
       if (!hasRange || rows.length === 0 || rows.length < requestLimit) break;
+
 
       const lastTimestamp = toFiniteNumber(rows[rows.length - 1]?.[0]);
       if (lastTimestamp === null || lastTimestamp >= endTime) break;
 
+
       cursor = lastTimestamp + intervalMs;
       if (!hasRange) remaining -= rows.length;
     }
+
 
     const unique = new Map();
     for (const candle of candles) unique.set(candle.timestamp, candle);
     return [...unique.values()].sort((a, b) => a.timestamp - b.timestamp);
   }
 
+
   async getHistoricalFunding(symbol, startTime, endTime) {
     const marketSymbol = normalizeSymbol(symbol);
     const rows = [];
     let cursor = startTime;
+
 
     while (cursor <= endTime) {
       const response = await this.httpClient.get(
@@ -284,11 +333,13 @@ class Backtester {
       const batch = Array.isArray(response.data) ? response.data : [];
       if (batch.length === 0) break;
 
+
       for (const row of batch) {
         const timestamp = toFiniteNumber(row?.fundingTime);
         const rate = toFiniteNumber(row?.fundingRate);
         if (timestamp !== null && rate !== null) rows.push({ timestamp, rate });
       }
+
 
       if (batch.length < FUNDING_LIMIT) break;
       const lastTimestamp = toFiniteNumber(batch[batch.length - 1]?.fundingTime);
@@ -296,15 +347,18 @@ class Backtester {
       cursor = lastTimestamp + 1;
     }
 
+
     const unique = new Map();
     for (const row of rows) unique.set(row.timestamp, row);
     return [...unique.values()].sort((a, b) => a.timestamp - b.timestamp);
   }
 
+
   async getHistoricalOpenInterest(symbol, startTime, endTime, period = DEFAULT_INTERVAL) {
     const marketSymbol = normalizeSymbol(symbol);
     const rows = [];
     let cursor = startTime;
+
 
     while (cursor <= endTime) {
       const response = await this.httpClient.get(
@@ -323,11 +377,13 @@ class Backtester {
       const batch = Array.isArray(response.data) ? response.data : [];
       if (batch.length === 0) break;
 
+
       for (const row of batch) {
         const timestamp = toFiniteNumber(row?.timestamp);
         const value = toFiniteNumber(row?.sumOpenInterestValue ?? row?.sumOpenInterest);
         if (timestamp !== null && value !== null) rows.push({ timestamp, value });
       }
+
 
       if (batch.length < OPEN_INTEREST_LIMIT) break;
       const lastTimestamp = toFiniteNumber(batch[batch.length - 1]?.timestamp);
@@ -335,10 +391,12 @@ class Backtester {
       cursor = lastTimestamp + 1;
     }
 
+
     const unique = new Map();
     for (const row of rows) unique.set(row.timestamp, row);
     return [...unique.values()].sort((a, b) => a.timestamp - b.timestamp);
   }
+
 
   async getHistoricalData(symbol, startTime, endTime, options = {}) {
     const interval = options.interval || this.defaultInterval;
@@ -350,13 +408,16 @@ class Backtester {
       this.getHistoricalOpenInterest(symbol, startTime, endTime, period),
     ];
 
+
     await onProgress({ percent: 5, stage: "Historical Data", message: "Fetching futures candles, funding and open interest..." });
     const results = await Promise.allSettled(tasks);
     const errors = [];
 
+
     const candles = results[0].status === "fulfilled" ? results[0].value : [];
     const funding = results[1].status === "fulfilled" ? results[1].value : [];
     const openInterest = results[2].status === "fulfilled" ? results[2].value : [];
+
 
     results.forEach((result, index) => {
       if (result.status === "rejected") {
@@ -365,10 +426,13 @@ class Backtester {
       }
     });
 
+
     await onProgress({ percent: 20, stage: "Historical Data", message: "Loaded " + candles.length + " candles, " + funding.length + " funding points and " + openInterest.length + " open-interest points." });
+
 
     return { candles, funding, openInterest, errors, interval, period };
   }
+
 
   buildHistoricalSignal(symbol, candleIndex, data) {
     const candle = data.candles[candleIndex];
@@ -378,12 +442,14 @@ class Backtester {
     const oiRow = latestAtOrBefore(data.openInterest, candle.timestamp);
     const priorOiRow = prior24 ? latestAtOrBefore(data.openInterest, prior24.timestamp) : null;
 
+
     const price = candle?.close ?? null;
     const priceChange = prior24 ? percentChange(price, prior24.close) : null;
     const oiChange = oiRow && priorOiRow ? percentChange(oiRow.value, priorOiRow.value) : null;
     const funding = fundingRow ? fundingRow.rate * 100 : null;
     const support = minPast(data.candles, candleIndex, "low", 6);
     const resistance = maxPast(data.candles, candleIndex, "high", 6);
+
 
     const priorClose6 = candleIndex >= 6 ? data.candles[candleIndex - 6].close : null;
     const priorClose18 = candleIndex >= 18 ? data.candles[candleIndex - 18].close : null;
@@ -396,10 +462,12 @@ class Backtester {
       priorClose18 !== null && price < priorClose18,
     ].filter(Boolean).length;
 
+
     const range = resistance !== null && support !== null ? resistance - support : null;
     const rangePosition = range && range > 0 ? (price - support) / range : 0.5;
     const earlyTransition =
       resistance !== null && price >= resistance * 0.995 && priceChange !== null && priceChange > 0;
+
 
     let perpAnalysis = "neutral perp structure";
     if (priceChange !== null && oiChange !== null) {
@@ -414,6 +482,7 @@ class Backtester {
       }
     }
 
+
     const mtfAnalysis = bullishVotes >= 2
       ? "full bullish bias"
       : bearishVotes >= 2
@@ -427,6 +496,7 @@ class Backtester {
     const accumulationAnalysis = earlyTransition
       ? "accumulation breakout transition"
       : "range accumulation";
+
 
     const makePack = (analysis) => ({
       result: {
@@ -447,6 +517,7 @@ class Backtester {
       },
     });
 
+
     const packs = {
       accumulation: makePack(accumulationAnalysis),
       perp: makePack(perpAnalysis),
@@ -454,24 +525,30 @@ class Backtester {
       mtf: makePack(mtfAnalysis),
     };
 
+
     return classifyCandidate(symbol, packs);
   }
+
 
   async analyzeAssetHistorical(symbol, timestamp, context = {}) {
     if (this.signalAnalyzer) {
       return this.signalAnalyzer(symbol, timestamp, context);
     }
 
+
     if (!context.data || context.candleIndex === undefined) {
       throw new Error("Historical analyzer requires aligned market data.");
     }
 
+
     return this.buildHistoricalSignal(symbol, context.candleIndex, context.data);
   }
+
 
   findExitCandle(candles, entryIndex, direction, entryPrice, stop, tp1, tp2) {
     const normalizedDirection = normalizeDirection(direction);
     if (!normalizedDirection) return null;
+
 
     for (let index = entryIndex + 1; index < candles.length; index++) {
       const candle = candles[index];
@@ -485,6 +562,7 @@ class Backtester {
         ? candle.high >= tp2
         : candle.low <= tp2);
 
+
       if (stopHit) {
         return {
           index,
@@ -494,14 +572,6 @@ class Backtester {
         };
       }
 
-      if (tp1Hit) {
-        return {
-          index,
-          time: candle.timestamp,
-          price: tp1,
-          reason: "TP1_HIT",
-        };
-      }
 
       if (tp2Hit) {
         return {
@@ -511,10 +581,22 @@ class Backtester {
           reason: "TP2_HIT",
         };
       }
+
+
+      if (tp1Hit) {
+        return {
+          index,
+          time: candle.timestamp,
+          price: tp1,
+          reason: "TP1_HIT",
+        };
+      }
     }
+
 
     const finalCandle = candles[candles.length - 1];
     if (!finalCandle) return null;
+
 
     return {
       index: candles.length - 1,
@@ -524,13 +606,16 @@ class Backtester {
     };
   }
 
+
   resolveEntryPrice(entry, currentPrice) {
     const direct = typeof entry === "number" ? toFiniteNumber(entry) : null;
     if (direct !== null && direct > 0) return direct;
 
+
     const values = extractNumbers(entry).filter((value) => value > 0);
     if (!values.length) return currentPrice;
     if (values.length === 1) return values[0];
+
 
     const low = Math.min(...values);
     const high = Math.max(...values);
@@ -539,6 +624,7 @@ class Backtester {
       : (low + high) / 2;
   }
 
+
   simulateTrade(candles, entryIndex, entry, tp1, tp2, stop, direction) {
     const normalizedDirection = normalizeDirection(direction);
     const entryPrice = this.resolveEntryPrice(entry, candles[entryIndex]?.close);
@@ -546,12 +632,15 @@ class Backtester {
     const secondTarget = toFiniteNumber(tp2);
     const stopPrice = toFiniteNumber(stop);
 
+
     if (!normalizedDirection || !entryPrice || !firstTarget || !stopPrice) return null;
+
 
     const validLevels = normalizedDirection === "long"
       ? stopPrice < entryPrice && firstTarget > entryPrice
       : stopPrice > entryPrice && firstTarget < entryPrice;
     if (!validLevels) return null;
+
 
     const outcome = this.findExitCandle(
       candles,
@@ -563,6 +652,7 @@ class Backtester {
       secondTarget
     );
     if (!outcome) return null;
+
 
     return {
       entryTime: candles[entryIndex].timestamp,
@@ -578,9 +668,11 @@ class Backtester {
     };
   }
 
+
   async backtest(symbol, startDate, endDate, options = {}) {
     let startTime;
     let endTime;
+
 
     if (typeof startDate === "number" && endDate === undefined) {
       const lookbackCandles = Math.max(1, Math.floor(startDate));
@@ -591,12 +683,15 @@ class Backtester {
       startTime = startDate === undefined ? endTime - this.defaultLookbackDays * 24 * 60 * 60 * 1000 : parseTimestamp(startDate, "start date");
     }
 
+
     if (endTime <= startTime) throw new Error("End date must be after start date.");
+
 
     const rangeDays = (endTime - startTime) / (24 * 60 * 60 * 1000);
     if (rangeDays > this.maxLookbackDays) {
       throw new Error("Backtest range cannot exceed " + this.maxLookbackDays + " days.");
     }
+
 
     const onProgress = options.onProgress || (async () => {});
     const data = await this.getHistoricalData(symbol, startTime, endTime, {
@@ -604,6 +699,7 @@ class Backtester {
       oiPeriod: options.oiPeriod || options.interval || this.defaultInterval,
       onProgress,
     });
+
 
     if (!data.candles.length) {
       return {
@@ -616,12 +712,15 @@ class Backtester {
       };
     }
 
+
     const trades = [];
     const allowOverlapping = options.allowOverlapping === true;
     let nextAvailableIndex = 18;
 
+
     for (let index = 18; index < data.candles.length; index++) {
       if (!allowOverlapping && index < nextAvailableIndex) continue;
+
 
       await onProgress({
         percent: 20 + Math.round(((index - 18) / Math.max(data.candles.length - 18, 1)) * 75),
@@ -629,13 +728,16 @@ class Backtester {
         message: "Replaying candle " + (index - 17) + " of " + (data.candles.length - 17) + "...",
       });
 
+
       const candle = data.candles[index];
       const signal = await this.analyzeAssetHistorical(symbol, candle.timestamp, {
         candleIndex: index,
         data,
       });
 
+
       if (!signal?.isActionable) continue;
+
 
       const trade = this.simulateTrade(
         data.candles,
@@ -647,6 +749,7 @@ class Backtester {
         signal.direction
       );
       if (!trade) continue;
+
 
       trades.push({
         symbol: String(symbol).toUpperCase(),
@@ -663,10 +766,13 @@ class Backtester {
         status: trade.status,
       });
 
+
       if (!allowOverlapping) nextAvailableIndex = trade.exitIndex + 1;
     }
 
+
     await onProgress({ percent: 100, stage: "Historical Replay", message: "Backtest complete." });
+
 
     return {
       symbol: String(symbol).toUpperCase(),
@@ -687,12 +793,26 @@ class Backtester {
     };
   }
 
-  calculateMetrics(trades) {
-    if (!Array.isArray(trades) || trades.length === 0) return emptyStats();
 
-    const winners = trades.filter((trade) => trade.pnlPercent > 0);
-    const losers = trades.filter((trade) => trade.pnlPercent < 0);
-    const breakeven = trades.filter((trade) => trade.pnlPercent === 0);
+  calculateMetrics(trades) {
+    const allTrades = Array.isArray(trades) ? trades : [];
+    const openTrades = allTrades.filter(
+      (trade) => String(trade.status || "").toLowerCase() === "open"
+    );
+    const closedTrades = allTrades.filter(
+      (trade) => String(trade.status || "").toLowerCase() !== "open"
+    );
+
+    if (closedTrades.length === 0) {
+      return {
+        ...emptyStats(),
+        openTrades: openTrades.length,
+      };
+    }
+
+    const winners = closedTrades.filter((trade) => trade.pnlPercent > 0);
+    const losers = closedTrades.filter((trade) => trade.pnlPercent < 0);
+    const breakeven = closedTrades.filter((trade) => trade.pnlPercent === 0);
     const grossProfit = winners.reduce((sum, trade) => sum + trade.pnlPercent, 0);
     const grossLoss = Math.abs(losers.reduce((sum, trade) => sum + trade.pnlPercent, 0));
     const avgWin = winners.length ? grossProfit / winners.length : 0;
@@ -702,7 +822,7 @@ class Backtester {
     let peak = 1;
     let maxDrawdown = 0;
 
-    for (const trade of trades) {
+    for (const trade of closedTrades) {
       equity *= 1 + trade.pnlPercent / 100;
       peak = Math.max(peak, equity);
       const drawdown = peak ? ((peak - equity) / peak) * 100 : 0;
@@ -710,11 +830,12 @@ class Backtester {
     }
 
     return {
-      totalTrades: trades.length,
+      totalTrades: closedTrades.length,
+      openTrades: openTrades.length,
       winners: winners.length,
       losers: losers.length,
       breakeven: breakeven.length,
-      winRate: round((winners.length / trades.length) * 100, 2),
+      winRate: round((winners.length / closedTrades.length) * 100, 2),
       avgWin: round(avgWin, 4),
       avgLoss: round(avgLoss, 4),
       profitFactor: grossLoss ? round(grossProfit / grossLoss, 4) : grossProfit ? null : 0,
@@ -726,10 +847,10 @@ class Backtester {
   }
 }
 
+
 module.exports = {
   Backtester,
   normalizeSymbol,
   latestAtOrBefore,
   calculatePnlPercent,
 };
-
