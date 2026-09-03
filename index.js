@@ -388,9 +388,7 @@ Preparing market intelligence report...`
 
 Reason:
 
-${error.message}
-
-Make sure CMC_MCP_ENDPOINT and CMC_API_KEY are configured.`
+${error.message}${/CMC_(?:MCP_ENDPOINT|API_KEY)/i.test(error.message) ? "\n\nMake sure CMC_MCP_ENDPOINT and CMC_API_KEY are configured." : ""}`
     );
   } finally {
     unlockScan();
