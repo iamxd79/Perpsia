@@ -26,6 +26,7 @@ const {
 
 // ========== BACKTESTER FOR PAPER TRADING ==========
 const { Backtester } = require("./services/backtester");
+const backtester = new Backtester();
 
 const {
   saveAssetState,
@@ -192,6 +193,43 @@ Assets analyzed: ${total}
   return output;
 }
 
+function formatBacktestResult(result) {
+  if (!result || result.status === "error") {
+    return "❌ BACKTEST FAILED" + String.fromCharCode(10) + String.fromCharCode(10) + (result?.message || "No historical data available.");
+  }
+
+  const stats = result.stats || {};
+  const formatPercent = (value) => Number.isFinite(value) ? Number(value).toFixed(2) + "%" : "N/A";
+  const profitFactor = stats.profitFactor === null ? "∞" : Number.isFinite(stats.profitFactor) ? Number(stats.profitFactor).toFixed(2) : "N/A";
+  const start = result.dateRange?.start ? new Date(result.dateRange.start).toISOString().slice(0, 10) : "N/A";
+  const end = result.dateRange?.end ? new Date(result.dateRange.end).toISOString().slice(0, 10) : "N/A";
+
+  const lines = [
+    "📊 PERPSIA PAPER BACKTEST — $" + result.symbol,
+    "",
+    "Range: " + start + " to " + end,
+    "Candles replayed: " + (result.candleCount || 0),
+    "Status: " + String(result.status || "unknown").toUpperCase(),
+    "",
+    "Trades: " + stats.totalTrades,
+    "Winners: " + stats.winners,
+    "Losers: " + stats.losers,
+    "Win rate: " + formatPercent(stats.winRate),
+    "Avg win: " + formatPercent(stats.avgWin),
+    "Avg loss: " + formatPercent(stats.avgLoss),
+    "Profit factor: " + profitFactor,
+    "Max drawdown: " + formatPercent(stats.maxDrawdown),
+    "Total return: " + formatPercent(stats.totalReturn),
+  ];
+
+  if (result.dataQuality?.errors?.length) {
+    lines.push("", "⚠️ Data quality: " + result.dataQuality.errors.join("; "));
+  }
+
+  lines.push("", "Paper trading only. No live orders were placed.");
+  return lines.join(String.fromCharCode(10));
+}
+
 // ==========================================
 // START COMMAND
 // ==========================================
@@ -225,8 +263,8 @@ Check agent status.
 🆔 /chatid
 Get your Telegram chat ID.
 
-📊 /backtest BTC
-Run paper trading backtest (experimental).
+📊 /backtest BTC [days]
+Run historical paper trading (default: 90 days).
 
 You can also talk naturally:
 
@@ -285,6 +323,46 @@ What would you like to do?`,
 
 bot.onText(/\/help/, async (msg) => {
   await bot.sendMessage(msg.chat.id, getHelpMessage());
+});
+
+bot.onText(/\/backtest(?:\s+([A-Za-z0-9$_-]+))?(?:\s+([0-9]+))?/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const symbol = match[1] || "BTC";
+  const requestedDays = Number(match[2] || 90);
+
+  if (!Number.isInteger(requestedDays) || requestedDays < 1 || requestedDays > 365) {
+    return bot.sendMessage(chatId, "Use /backtest BTC [days] with days between 1 and 365.");
+  }
+
+  const endDate = Date.now();
+  const startDate = endDate - requestedDays * 24 * 60 * 60 * 1000;
+  const loading = await bot.sendMessage(
+    chatId,
+    "⏳ PERPSIA PAPER BACKTEST" + String.fromCharCode(10) + String.fromCharCode(10) +
+      "Fetching " + requestedDays + " days of Binance futures data for $" + symbol + "...",
+  );
+
+  try {
+    const result = await backtester.backtest(symbol, startDate, endDate, {
+      onProgress: async (progress) => {
+        await safeEditMessage(
+          chatId,
+          loading.message_id,
+          "⏳ PERPSIA PAPER BACKTEST" + String.fromCharCode(10) + String.fromCharCode(10) +
+            progress.message,
+        );
+      },
+    });
+
+    await safeEditMessage(chatId, loading.message_id, formatBacktestResult(result));
+  } catch (error) {
+    console.error("Paper backtest failed:", error);
+    await safeEditMessage(
+      chatId,
+      loading.message_id,
+      "❌ BACKTEST FAILED" + String.fromCharCode(10) + String.fromCharCode(10) + error.message,
+    );
+  }
 });
 
 // ==========================================
