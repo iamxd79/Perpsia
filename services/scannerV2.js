@@ -4,7 +4,7 @@
 // Integrates live CMC Skill Hub execution with fallback caching
 
 const { executeSkill } = require("./cmcClient");
-const { buildCMCParams } = require("./exchangeAdapter");
+const { buildCMCParams, normalizeVenue } = require("./exchangeAdapter");
 const { RequestQueue } = require("./queue");
 
 const ACTIVE_SIGNAL_SCORE = 70;
@@ -798,6 +798,8 @@ ${mtfText}
  * Run market scan with live CMC Skill Hub (production version)
  */
 async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
+  venue = normalizeVenue(venue);
+
   await onProgress({
     percent: 10,
     stage: "Market Scanner",
@@ -904,12 +906,15 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
         onProgress
       );
 
-      const result = classifyCandidate(symbol, {
-        accumulation,
-        perp,
-        orderbook,
-        mtf,
-      });
+      const result = {
+        ...classifyCandidate(symbol, {
+          accumulation,
+          perp,
+          orderbook,
+          mtf,
+        }),
+        venue,
+      };
 
       results.push(result);
     } catch (error) {
@@ -944,6 +949,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
  */
 async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => {}) {
   symbol = normalizeSymbol(symbol);
+  venue = normalizeVenue(venue);
 
   await onProgress({
     percent: 15,
@@ -1010,12 +1016,15 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
     onProgress
   );
 
-  return classifyCandidate(symbol, {
-    accumulation,
-    perp,
-    orderbook,
-    mtf,
-  });
+  return {
+    ...classifyCandidate(symbol, {
+      accumulation,
+      perp,
+      orderbook,
+      mtf,
+    }),
+    venue,
+  };
 }
 
 // Export v2 API
