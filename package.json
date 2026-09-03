@@ -3,7 +3,8 @@
   "version": "2.1.0",
   "main": "index.js",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "build": "node --check index.js && node --check services/scannerV2.js && node --check services/providers/evidence.js && node --check services/providers/registry.js && node --check services/providers/publicProviders.js && node --check services/providers/crossSource.js && node --check services/providers/streams.js"
   },
   "keywords": [],
   "author": "",
