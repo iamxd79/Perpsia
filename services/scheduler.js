@@ -1,4 +1,5 @@
 const { runMarketScan } = require("./scannerV2");
+const { normalizeVenue } = require("./exchangeAdapter");
 
 const {
   getLastAssetState,
@@ -72,11 +73,15 @@ Alerts sent: ${alertCount}
 Perpsia will keep monitoring.`;
 }
 
-async function runScheduledScan({ bot, chatId }) {
+async function runScheduledScan({ bot, chatId, venue }) {
   if (!chatId) {
     console.log("Scheduler skipped: TELEGRAM_CHAT_ID is missing.");
     return;
   }
+
+  const selectedVenue = normalizeVenue(
+    venue || process.env.PERPSIA_DEFAULT_VENUE || "Binance"
+  );
 
   if (!lockScan()) {
     console.log("Scheduler skipped: another CMC scan is already running.");
@@ -95,7 +100,7 @@ Booting scheduled market intelligence scan...`
   );
 
   try {
-    const result = await runMarketScan("Binance", async (progress) => {
+    const result = await runMarketScan(selectedVenue, async (progress) => {
       await safeEditMessage(
         bot,
         chatId,
@@ -168,7 +173,7 @@ ${error.message}`
   }
 }
 
-function startScheduler({ bot, chatId, intervalMs = 4 * 60 * 60 * 1000 }) {
+function startScheduler({ bot, chatId, intervalMs = 4 * 60 * 60 * 1000, venue }) {
   if (!bot) {
     throw new Error("Scheduler requires bot instance.");
   }
@@ -181,7 +186,7 @@ function startScheduler({ bot, chatId, intervalMs = 4 * 60 * 60 * 1000 }) {
   console.log(`Perpsia smart alert scheduler started. Interval: ${intervalMs}ms`);
 
   setInterval(() => {
-    runScheduledScan({ bot, chatId });
+    runScheduledScan({ bot, chatId, venue });
   }, intervalMs);
 }
 
