@@ -1,10 +1,13 @@
 # Perpsia Terminal
 
+
 Perpsia is a perpetual-futures market intelligence assistant designed to help
 traders research markets, review opportunities, monitor changes, and receive
 structured Telegram reports.
 
+
 The project currently includes:
+
 
 - a live Telegram bot deployed on Render;
 - a Node.js intelligence workflow for scans, analysis, memory, lifecycle,
@@ -12,17 +15,23 @@ The project currently includes:
 - a verified CoinMarketCap Skill Hub MCP worker prototype;
 - a separate landing page and product branding.
 
+
 Perpsia is a research tool. It does not guarantee profits and does not replace
 independent research or risk management.
 
+
 ---
 
+
 ## Product vision
+
 
 Perpsia is being built as an autonomous market intelligence layer for
 perpetual-futures traders.
 
+
 The long-term workflow is:
+
 
 ```text
 User request or scheduled scan
@@ -42,18 +51,24 @@ Memory and lifecycle comparison
 Telegram report or alert
 ```
 
+
 The goal is not to blindly copy provider output. External data is treated as
 research evidence, while Perpsia remains responsible for its own interpretation,
 risk rules, and final presentation.
 
+
 ---
 
+
 ## Current live bot
+
 
 The Telegram bot is deployed on Render and supports a conversational research
 workflow.
 
+
 ### Commands
+
 
 ```text
 /start
@@ -67,7 +82,9 @@ workflow.
 /chatid
 ```
 
+
 ### Natural-language examples
+
 
 ```text
 Analyze BTC
@@ -80,7 +97,9 @@ I have $500, risk 1%, max leverage 5x
 Check Perpsia status
 ```
 
+
 ### Current bot capabilities
+
 
 - Telegram bot interface
 - Natural-language intent routing
@@ -98,15 +117,26 @@ Check Perpsia status
 - Smart alerts
 - Shared scan lock
 - Basic rate limiting and anti-spam protection
+- Binance, Bybit, OKX, dYdX, and Hyperliquid venue-aware analysis
+- Public RPC on-chain transfer monitoring for supported assets
+- Paper-signal performance leaderboard at /performance
+- JSON performance APIs at /api/performance and /api/performance/trades
+- Prometheus metrics at /metrics
+- Retry and circuit-breaker protection around provider calls
+
 
 ---
 
+
 ## CoinMarketCap Skill Hub integration
+
 
 Perpsia also includes a separate CMC Skill Hub worker prototype that has been
 verified against the live MCP service.
 
+
 The verified flow is:
+
 
 ```text
 Perpsia worker
@@ -119,13 +149,17 @@ Perpsia worker
   -> structured research output
 ```
 
+
 ### Verified health check
+
 
 ```bash
 npm run worker -- cmc health --live
 ```
 
+
 Verified response:
+
 
 ```json
 {
@@ -143,13 +177,17 @@ Verified response:
 }
 ```
 
+
 ### Verified discovery run
+
 
 ```bash
 npm run worker -- cmc discover --dry-run --live
 ```
 
+
 The live response confirmed:
+
 
 - successful skill execution;
 - `rawSkillId: altcoin_scanner_perp`;
@@ -157,25 +195,34 @@ The live response confirmed:
 - ranked perpetual-altcoin candidates;
 - provider-envelope validation and admission metadata.
 
+
 ### Single-asset analysis
 
+
 SOL example:
+
 
 ```bash
 npm run worker -- cmc analyze --cmcid 5426 --dry-run --live
 ```
 
+
 This worker uses `perp_contract_analysis` for the requested asset.
+
 
 ### Important integration status
 
+
 The live MCP worker has been verified independently.
+
 
 The Telegram bot and the worker should only be described as one complete
 end-to-end system after the Telegram command path is explicitly wired to the
 live worker.
 
+
 For now, the accurate description is:
+
 
 > Perpsia has a live Telegram product and a verified CMC Skill Hub worker
 > prototype. The next step is to connect them through one production-ready
@@ -183,17 +230,24 @@ For now, the accurate description is:
 
 ---
 
+
 ## Intelligence model
+
 
 Perpsia uses three different responsibility layers.
 
+
 ### CoinMarketCap Skill Hub
+
 
 Provides market research and structured market intelligence.
 
+
 ### Perpsia engine
 
+
 Responsible for:
+
 
 - classification;
 - scoring;
@@ -202,28 +256,38 @@ Responsible for:
 - meaningful-change detection;
 - alert logic.
 
+
 ### OpenAI reasoning layer
 
+
 Used for:
+
 
 - explanation;
 - contradiction analysis;
 - natural-language interaction;
 - report composition.
 
+
 OpenAI should not independently create or approve trading decisions.
+
 
 ---
 
+
 ## Risk management
 
+
 Users can configure a personal risk profile:
+
 
 ```text
 /risk 500 1 5
 ```
 
+
 Example interpretation:
+
 
 ```text
 Capital: $500
@@ -231,14 +295,19 @@ Risk per trade: 1%
 Maximum leverage: 5x
 ```
 
+
 Perpsia uses these settings to provide personalized risk information when a
 relevant opportunity is identified.
 
+
 ---
+
 
 ## Autonomous scans
 
+
 The live bot scheduler runs market scans every four hours.
+
 
 ```text
 Scheduled scan
@@ -250,14 +319,19 @@ Scheduled scan
   -> Telegram alert
 ```
 
+
 Alerts should only be sent when the system detects a meaningful change rather
 than repeating the same information.
 
+
 ---
+
 
 ## Current architecture
 
+
 ### Live Telegram application
+
 
 ```text
 Telegram user
@@ -277,7 +351,9 @@ Report composer
 Telegram response
 ```
 
+
 ### CMC Skill Hub worker prototype
+
 
 ```text
 CLI worker
@@ -295,11 +371,15 @@ Validation
 Structured research output
 ```
 
+
 ---
+
 
 ## Main technologies
 
+
 ### Live bot
+
 
 - Node.js
 - Telegram Bot API
@@ -308,7 +388,9 @@ Structured research output
 - Render
 - JavaScript services
 
+
 ### CMC worker prototype
+
 
 - TypeScript
 - CoinMarketCap Skill Hub MCP
@@ -317,45 +399,65 @@ Structured research output
 - Supabase-ready ingestion layer
 - Dry-run and audit modes
 
+
 ### Frontend and branding
+
 
 - Separate Perpsia landing page
 - Dedicated product branding and visual identity
 
+
 ---
+
 
 ## Local bot setup
 
+
 Create a `.env` file at the project root:
+
 
 ```text
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 OPENAI_API_KEY=
+PERPSIA_DB_PATH=
+PERFORMANCE_DASHBOARD_URL=
+PERFORMANCE_CORS_ORIGIN=
+ONCHAIN_RPC_URLS=
+ONCHAIN_ASSET_REGISTRY=
+ONCHAIN_EXCHANGE_ADDRESSES=
 ```
+
 
 Add any additional CMC Skill Hub or MCP configuration required by the local
 worker implementation.
 
+
 Never commit environment files or secrets.
 
+
 ### Install
+
 
 ```bash
 npm install
 ```
 
+
 ### Run
+
 
 ```bash
 node index.js
 ```
 
+
 ### Syntax checks
+
 
 ```bash
 node --check index.js
-node --check services/scanner.js
+node --check services/scannerV2.js
 node --check services/memory.js
 node --check services/scheduler.js
 node --check services/openaiReasoning.js
@@ -368,13 +470,18 @@ node --check services/counterThesis.js
 node --check services/reportComposer.js
 node --check services/rateLimit.js
 node --check services/scanLock.js
+npm test
 ```
+
 
 ---
 
+
 ## Security
 
+
 Never commit:
+
 
 ```text
 node_modules/
@@ -385,7 +492,9 @@ perpsia.db
 *.sqlite
 ```
 
+
 Recommended `.gitignore` entries:
+
 
 ```gitignore
 node_modules/
@@ -396,7 +505,9 @@ perpsia.db
 *.sqlite
 ```
 
+
 Never expose:
+
 
 - Telegram bot tokens;
 - OpenAI API keys;
@@ -404,13 +515,18 @@ Never expose:
 - MCP authorization headers;
 - provider credentials.
 
+
 ---
+
 
 ## Development status
 
+
 Perpsia V1 is a working product prototype.
 
+
 ### Verified
+
 
 - Telegram service deployed on Render
 - Health server running
@@ -422,22 +538,21 @@ Perpsia V1 is a working product prototype.
 - live `altcoin_scanner_perp` execution
 - live CMC evidence validation
 
-### In progress
 
-- production connection between Telegram commands and the live CMC worker;
-- simpler V2 architecture;
-- provider-independent LLM routing;
-- deterministic scoring;
-- improved persistence;
-- paper-trading validation;
-- better operational monitoring.
+### Operational notes
 
+- SQLite history is durable only when PERPSIA_DB_PATH points to persistent storage.
+- Public on-chain monitoring requires RPC access and exchange-address configuration for exchange-flow attribution.
+- Performance results are paper-signal statistics, not audited investment returns.
 ---
+
 
 ## Integration proof
 
+
 For technical verification, the following sequence demonstrates the live CMC
 connection:
+
 
 ```bash
 npm run worker -- cmc health --live
@@ -445,28 +560,37 @@ npm run worker -- cmc discover --dry-run --live
 npm run worker -- cmc analyze --cmcid 5426 --dry-run --live
 ```
 
+
 This section exists as technical verification only. It is not the main purpose
 of the project.
 
+
 ---
+
 
 ## Roadmap
 
+
 ### Phase 1 — Consolidate V1
+
 
 - keep the current live Telegram bot stable;
 - preserve the existing landing page and branding;
 - document the real architecture;
 - separate verified functionality from planned functionality.
 
+
 ### Phase 2 — Perpsia V2 foundation
+
 
 - create a clean backend repository;
 - define provider-independent interfaces;
 - connect Telegram to CMC Skill Hub through one production path;
 - add structured logging and error handling.
 
+
 ### Phase 3 — Intelligence layer
+
 
 - deterministic market classification;
 - data freshness and quality scoring;
@@ -474,7 +598,9 @@ of the project.
 - personalized risk calculations;
 - explainable outputs.
 
+
 ### Phase 4 — Persistence and evaluation
+
 
 - scan history;
 - opportunity lifecycle;
@@ -483,20 +609,27 @@ of the project.
 - MFE and MAE;
 - model and rule evaluation.
 
+
 ### Phase 5 — Private beta
+
 
 - onboard a small user group;
 - measure usefulness and false positives;
 - improve report quality;
 - refine alerts before any trading execution feature.
 
+
 ---
+
 
 ## Disclaimer
 
+
 Perpsia is a market intelligence and research tool.
+
 
 It does not guarantee profits, predict market outcomes with certainty, or
 replace independent research and risk management.
+
 
 Nothing generated by Perpsia should be considered financial advice.
