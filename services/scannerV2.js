@@ -2197,6 +2197,8 @@ function classifyCandidate(symbol, packs) {
   const liquidationFlow = packs.liquidation || null;
   const whaleActivity = packs.whaleActivity || null;
   const correlation = packs.correlation || null;
+  const crossSource = packs.crossSource || buildCrossSourceSignals(Array.isArray(packs.marketEvidence) ? packs.marketEvidence : []);
+  const securityBlocked = Boolean(crossSource.signals.some((signal) => signal.hardRisk));
 
 
 
