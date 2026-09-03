@@ -1148,7 +1148,8 @@ Memory: Active
 Lifecycle: Active
 Smart Alerts: Active
 Multi-Exchange: Active
-Request Queue: Active`
+Request Queue: Active
+Whale Alerts: ${process.env.WHALE_ALERT_KEY ? "CONFIGURED" : "NOT CONFIGURED"}`
       );
     }
 
@@ -1255,6 +1256,7 @@ Counter-Thesis Engine: ACTIVE
 Risk Engine: ACTIVE
 Request Queue: ACTIVE
 Multi-Exchange Support: ACTIVE
+Whale Alerts: ${process.env.WHALE_ALERT_KEY ? "CONFIGURED" : "NOT CONFIGURED"}
 4H Autonomous Scheduler: ${schedulerStatus}`
   );
 });
@@ -1297,6 +1299,7 @@ http
           "multi-exchange",
           "request-queue",
           "backtester-ready",
+          "whale-alerts-optional",
         ],
       })
     );
