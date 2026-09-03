@@ -22,6 +22,7 @@ const {
 const {
   isExchangeSupported,
   listSupportedExchanges,
+  normalizeVenue,
 } = require("./services/exchangeAdapter");
 
 // ========== BACKTESTER FOR PAPER TRADING ==========
@@ -237,8 +238,8 @@ function formatBacktestResult(result) {
 function getHelpMessage() {
   return `⚙️ PERPSIA COMMANDS
 
-🔎 /scan
-Scan the perpetual futures market with live CMC data.
+🔎 /scan [venue]
+Scan the perpetual futures market with live CMC data. The candidate scan is global; deep analysis uses the selected venue.
 
 🧠 /analyze BTC [venue]
 Run deep analysis on any supported futures asset.
@@ -425,6 +426,8 @@ Perpsia will apply this profile when an actionable LONG or SHORT setup is detect
 // ==========================================
 
 async function runManualScan(chatId, venue = "Binance") {
+  venue = normalizeVenue(venue);
+
   if (!lockScan()) {
     return bot.sendMessage(
       chatId,
@@ -543,6 +546,8 @@ Supported: ${listSupportedExchanges()
   .join(", ")}`
     );
   }
+
+  venue = normalizeVenue(venue);
 
   const cooldown = checkCooldown(chatId, "analyze");
 
