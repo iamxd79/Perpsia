@@ -52,7 +52,7 @@ test("retries transient failures with bounded attempts", async () => {
   const value = await withRetries(
     async () => {
       attempts += 1;
-      if (attempts < 3) throw new Error("temporary failure");
+      if (attempts < 3) throw new Error("temporary timeout");
       return "ok";
     },
     { retries: 2, baseDelayMs: 0, maxDelayMs: 0 }
