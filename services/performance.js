@@ -4,14 +4,21 @@
 // Live entries are paper signals only. Closed outcomes are settled against
 // public Binance futures candles and never presented as audited performance.
 
+
 const axios = require("axios");
 const crypto = require("crypto");
 const path = require("path");
 const Database = require("better-sqlite3");
 
-const dbPath = path.join(__dirname, "..", "perpsia.db");
+
+const configuredDbPath = process.env.PERPSIA_DB_PATH;
+const dbPath = configuredDbPath
+  ? path.resolve(configuredDbPath)
+  : path.join(__dirname, "..", "perpsia.db");
+const storageIsPersistent = Boolean(configuredDbPath || process.env.RENDER_DISK_PATH);
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
+
 
 db.exec([
   "CREATE TABLE IF NOT EXISTS performance_signals (",
@@ -37,14 +44,37 @@ db.exec([
   "CREATE INDEX IF NOT EXISTS idx_performance_signal_status ON performance_signals(status)",
 ].join(String.fromCharCode(10)));
 
+
 const DEFAULT_LOOKBACK_DAYS = 30;
 const MAX_LOOKBACK_DAYS = 365;
 const CANDLE_INTERVAL = "1h";
+
+function getDashboardUrl() {
+  if (process.env.PERFORMANCE_DASHBOARD_URL) {
+    return process.env.PERFORMANCE_DASHBOARD_URL;
+  }
+  const baseUrl = String(
+    process.env.RENDER_EXTERNAL_URL || "https://perpsia.onrender.com"
+  ).replace(/\/$/, "");
+  return baseUrl + "/performance";
+}
+
+function getStorageInfo() {
+  return {
+    backend: "sqlite",
+    persistent: storageIsPersistent,
+    warning: storageIsPersistent
+      ? null
+      : "SQLite is using the ephemeral service filesystem; set PERPSIA_DB_PATH to a mounted persistent disk path.",
+  };
+}
+
 
 function number(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
+
 
 function normalizeSymbol(symbol) {
   const value = String(symbol || "")
@@ -52,8 +82,10 @@ function normalizeSymbol(symbol) {
     .replace(String.fromCharCode(36), "")
     .toUpperCase();
 
+
   return value.endsWith("USDT") ? value : value + "USDT";
 }
+
 
 function normalizeDirection(direction) {
   const value = String(direction || "").toLowerCase();
@@ -62,19 +94,23 @@ function normalizeDirection(direction) {
   return null;
 }
 
+
 function extractNumbers(value) {
   const matches = String(value || "").match(new RegExp("[-+]?[0-9]+(?:[.][0-9]+)?", "g")) || [];
   return matches.map(Number).filter(Number.isFinite);
 }
 
+
 function resolveEntryPrice(entry, currentPrice) {
   const direct = number(entry);
   if (direct !== null && direct > 0) return direct;
+
 
   const values = extractNumbers(entry).filter((item) => item > 0);
   const current = number(currentPrice);
   if (!values.length) return current;
   if (values.length === 1) return values[0];
+
 
   const low = Math.min(...values);
   const high = Math.max(...values);
@@ -83,10 +119,12 @@ function resolveEntryPrice(entry, currentPrice) {
     : (low + high) / 2;
 }
 
+
 function round(value, digits = 6) {
   const parsed = number(value);
   return parsed === null ? null : Number(parsed.toFixed(digits));
 }
+
 
 function makeSignalId(signal, observedAt) {
   const bucket = Math.floor(observedAt / (4 * 60 * 60 * 1000));
@@ -99,8 +137,10 @@ function makeSignalId(signal, observedAt) {
     bucket,
   ].join("|");
 
+
   return crypto.createHash("sha1").update(identity).digest("hex");
 }
+
 
 function validLevels(direction, entry, stop, tp1) {
   return direction === "LONG"
@@ -108,16 +148,19 @@ function validLevels(direction, entry, stop, tp1) {
     : stop > entry && tp1 < entry;
 }
 
+
 function recordSignal(signal, source = "live") {
   if (!signal?.isActionable) {
     return { recorded: false, reason: "not_actionable" };
   }
+
 
   const direction = normalizeDirection(signal.direction);
   const entry = resolveEntryPrice(signal.entry, signal.price);
   const stop = number(signal.stop);
   const tp1 = number(signal.tp1);
   const tp2 = number(signal.tp2);
+
 
   if (
     !direction ||
@@ -128,6 +171,7 @@ function recordSignal(signal, source = "live") {
   ) {
     return { recorded: false, reason: "invalid_trade_levels" };
   }
+
 
   const observedAt = Date.now();
   const id = makeSignalId(signal, observedAt);
@@ -149,12 +193,14 @@ function recordSignal(signal, source = "live") {
     source
   );
 
+
   return {
     recorded: result.changes > 0,
     id,
     status: "OPEN",
   };
 }
+
 
 function getOpenSignals(cutoffTime) {
   return db.prepare([
@@ -164,11 +210,13 @@ function getOpenSignals(cutoffTime) {
   ].join(String.fromCharCode(10))).all(cutoffTime);
 }
 
+
 function pnlPercent(direction, entry, exit) {
   return direction === "SHORT"
     ? ((entry - exit) / entry) * 100
     : ((exit - entry) / entry) * 100;
 }
+
 
 function parseKlines(rows) {
   return (Array.isArray(rows) ? rows : [])
@@ -181,6 +229,7 @@ function parseKlines(rows) {
     .filter((row) => [row.timestamp, row.high, row.low, row.close].every((value) => value !== null))
     .sort((a, b) => a.timestamp - b.timestamp);
 }
+
 
 function findExit(candles, signal) {
   for (const candle of candles) {
@@ -196,27 +245,33 @@ function findExit(candles, signal) {
       ? candle.high >= signal.tp1_price
       : candle.low <= signal.tp1_price;
 
+
     if (stopHit) {
       return { time: candle.timestamp, price: signal.stop_price, reason: "STOP_HIT", status: "LOST" };
     }
 
+
     if (tp2Hit) {
       return { time: candle.timestamp, price: signal.tp2_price, reason: "TP2_HIT", status: "WON" };
     }
+
 
     if (tp1Hit) {
       return { time: candle.timestamp, price: signal.tp1_price, reason: "TP1_HIT", status: "WON" };
     }
   }
 
+
   return null;
 }
+
 
 async function fetchCandles(signal, options = {}) {
   const httpClient = options.httpClient || axios;
   const baseUrl = options.futuresBaseUrl ||
     process.env.PERFORMANCE_FUTURES_BASE_URL ||
     "https://fapi.binance.com";
+
 
   const response = await httpClient.get(baseUrl + "/fapi/v1/klines", {
     params: {
@@ -229,8 +284,10 @@ async function fetchCandles(signal, options = {}) {
     timeout: 12000,
   });
 
+
   return parseKlines(response.data);
 }
+
 
 async function settleOpenSignals(options = {}) {
   const requestedDays = Number(options.lookbackDays || DEFAULT_LOOKBACK_DAYS);
@@ -242,13 +299,16 @@ async function settleOpenSignals(options = {}) {
   let settled = 0;
   const errors = [];
 
+
   for (const signal of openSignals.slice(0, 100)) {
     try {
       const candles = await fetchCandles(signal, options);
       const candlesAfterEntry = candles.filter((candle) => candle.timestamp > signal.signal_time);
       const exit = findExit(candlesAfterEntry, signal);
 
+
       if (!exit) continue;
+
 
       db.prepare([
         "UPDATE performance_signals",
@@ -269,6 +329,7 @@ async function settleOpenSignals(options = {}) {
     }
   }
 
+
   return {
     considered: openSignals.length,
     settled,
@@ -276,10 +337,12 @@ async function settleOpenSignals(options = {}) {
   };
 }
 
+
 function formatPercent(value, digits = 2) {
   const parsed = number(value) || 0;
   return parsed.toFixed(digits) + "%";
 }
+
 
 function calculateStats(trades) {
   const winners = trades.filter((trade) => trade.pnl_percent > 0);
@@ -295,16 +358,19 @@ function calculateStats(trades) {
     : 0;
   const standardDeviation = Math.sqrt(variance);
 
+
   let equity = 1;
   let peak = 1;
   let maxDrawdown = 0;
   let consecutiveWins = 0;
   let maxConsecutiveWins = 0;
 
+
   for (const trade of trades) {
     equity *= 1 + trade.pnl_percent / 100;
     peak = Math.max(peak, equity);
     maxDrawdown = Math.max(maxDrawdown, peak ? ((peak - equity) / peak) * 100 : 0);
+
 
     if (trade.pnl_percent > 0) {
       consecutiveWins += 1;
@@ -313,6 +379,7 @@ function calculateStats(trades) {
       consecutiveWins = 0;
     }
   }
+
 
   return {
     winners: winners.length,
@@ -331,6 +398,7 @@ function calculateStats(trades) {
   };
 }
 
+
 async function getPerformance(options = {}) {
   const requestedDays = Number(options.lookbackDays || DEFAULT_LOOKBACK_DAYS);
   const lookbackDays = Number.isFinite(requestedDays)
@@ -341,6 +409,7 @@ async function getPerformance(options = {}) {
     ? { considered: 0, settled: 0, errors: [] }
     : await settleOpenSignals({ ...options, lookbackDays });
 
+
   const signals = db.prepare([
     "SELECT * FROM performance_signals",
     "WHERE signal_time >= ?",
@@ -349,6 +418,7 @@ async function getPerformance(options = {}) {
   const closed = signals.filter((signal) => ["WON", "LOST"].includes(signal.status));
   const openSignals = signals.filter((signal) => signal.status === "OPEN");
   const stats = calculateStats(closed);
+
 
   return {
     last_30_days: {
@@ -367,7 +437,7 @@ async function getPerformance(options = {}) {
       max_drawdown: stats.max_drawdown,
       total_return: stats.total_return,
     },
-    live_dashboard: process.env.PERFORMANCE_DASHBOARD_URL || "/performance",
+    live_dashboard: getDashboardUrl(),
     verified_by: process.env.PERFORMANCE_VERIFIED_BY || null,
     data_status: closed.length ? "paper_signal_history" : "no_settled_signals",
     generated_at: new Date().toISOString(),
@@ -376,12 +446,14 @@ async function getPerformance(options = {}) {
   };
 }
 
+
 function getPerformanceRows(options = {}) {
   const requestedDays = Number(options.lookbackDays || DEFAULT_LOOKBACK_DAYS);
   const days = Number.isFinite(requestedDays)
     ? Math.min(Math.max(Math.floor(requestedDays), 1), MAX_LOOKBACK_DAYS)
     : DEFAULT_LOOKBACK_DAYS;
   const cutoffTime = Date.now() - days * 24 * 60 * 60 * 1000;
+
 
   return db.prepare([
     "SELECT symbol, venue, direction, entry_price, stop_price, tp1_price,",
@@ -393,9 +465,11 @@ function getPerformanceRows(options = {}) {
   ].join(String.fromCharCode(10))).all(cutoffTime);
 }
 
+
 module.exports = {
   getPerformance,
   getPerformanceRows,
   recordSignal,
   settleOpenSignals,
+  getStorageInfo,
 };
