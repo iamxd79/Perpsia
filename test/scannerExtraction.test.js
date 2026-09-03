@@ -24,3 +24,28 @@ test("extracts candidates from the live ranked-primary CMC report heading", () =
   };
   assert.deepEqual(extractSymbolsFromScan(payload), ["BTW", "USDC", "CASHCAT"]);
 });
+
+
+test("extracts symbols from the live ranked candidate table", () => {
+  const payload = {
+    result: {
+      data: {
+        data: {
+          decision_report: {
+            analysis: [
+              "### Ranked Primary Candidate Queue",
+              "| Rank | Token | Tier | Bias |",
+              "|---|---|---|---|",
+              "| 1 | AERO | Trend Supported | Bullish |",
+              "| 2 | USDC | Watch | Bullish |",
+              "| 3 | CASHCAT | Crowded Chop | Neutral |",
+              "### Secondary Candidates",
+              "| 1 | EUR | Review | Bearish |",
+            ].join(String.fromCharCode(10)),
+          },
+        },
+      },
+    },
+  };
+  assert.deepEqual(extractSymbolsFromScan(payload), ["AERO", "USDC", "CASHCAT"]);
+});
