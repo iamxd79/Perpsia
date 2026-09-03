@@ -1,5 +1,6 @@
 "use strict";
 
+
 const axios = require("axios");
 const {
   collectProviders,
@@ -8,6 +9,7 @@ const {
   getProviderHealth,
   registerProvider,
 } = require("./registry");
+
 
 const BINANCE_FUTURES = "https://fapi.binance.com";
 const BINANCE_SPOT = "https://api.binance.com";
@@ -22,11 +24,13 @@ const GOPLUS = "https://api.gopluslabs.io";
 const HONEYPOT = "https://api.honeypot.is";
 const GITHUB = "https://api.github.com";
 
+
 function number(value) {
   if (value === null || value === undefined || value === "") return null;
   const result = Number(value);
   return Number.isFinite(result) ? result : null;
 }
+
 
 function normalizeAssetSymbol(raw) {
   const value = String(raw || "")
@@ -38,17 +42,21 @@ function normalizeAssetSymbol(raw) {
   return value.replace(/[^A-Z0-9.]/g, "");
 }
 
+
 function asUsdtSymbol(raw) {
   return normalizeAssetSymbol(raw) + "USDT";
 }
+
 
 function asOkxSwap(raw) {
   return normalizeAssetSymbol(raw) + "-USDT-SWAP";
 }
 
+
 function asOkxSpot(raw) {
   return normalizeAssetSymbol(raw) + "-USDT";
 }
+
 
 function depthSummary(book) {
   const bids = Array.isArray(book?.bids) ? book.bids : [];
@@ -67,6 +75,7 @@ function depthSummary(book) {
   };
 }
 
+
 function bybitDepthSummary(book) {
   return depthSummary({
     bids: book?.b || [],
@@ -74,12 +83,14 @@ function bybitDepthSummary(book) {
   });
 }
 
+
 function okxDepthSummary(book) {
   return depthSummary({
     bids: book?.bids || [],
     asks: book?.asks || [],
   });
 }
+
 
 function hyperliquidDepthSummary(book) {
   const levels = Array.isArray(book?.levels) ? book.levels : [];
@@ -89,9 +100,11 @@ function hyperliquidDepthSummary(book) {
   });
 }
 
+
 function responseData(response) {
   return response?.data ?? response;
 }
+
 
 async function getJson(url, options = {}) {
   const response = await axios.get(url, {
@@ -101,6 +114,7 @@ async function getJson(url, options = {}) {
   });
   return responseData(response);
 }
+
 
 async function postJson(url, body, options = {}) {
   const response = await axios.post(url, body, {
@@ -113,14 +127,17 @@ async function postJson(url, body, options = {}) {
   return responseData(response);
 }
 
+
 function settledValue(result) {
   return result?.status === "fulfilled" ? result.value : null;
 }
+
 
 function evidenceStatus(price, availableCount) {
   if (availableCount === 0) throw new Error("provider returned no usable response");
   return price === null ? "degraded" : "ok";
 }
+
 
 async function fetchBinance(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
@@ -163,6 +180,7 @@ async function fetchBinance(symbol, options = {}) {
     },
   };
 }
+
 
 async function fetchBybit(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
@@ -216,6 +234,7 @@ async function fetchBybit(symbol, options = {}) {
     },
   };
 }
+
 
 async function fetchOkx(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
@@ -275,6 +294,7 @@ async function fetchOkx(symbol, options = {}) {
   };
 }
 
+
 async function fetchHyperliquid(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
   const [metaResponse, bookResponse] = await Promise.all([
@@ -313,12 +333,14 @@ async function fetchHyperliquid(symbol, options = {}) {
   };
 }
 
+
 function pairScore(pair, asset) {
   const base = String(pair?.baseToken?.symbol || "").toUpperCase();
   const quote = String(pair?.quoteToken?.symbol || "").toUpperCase();
   const exact = base === asset ? 1000000000 : quote === asset ? 500000000 : 0;
   return exact + (number(pair?.liquidity?.usd) || 0) + (number(pair?.volume?.h24) || 0);
 }
+
 
 function dexPairEvidence(pair, provider, asset) {
   const base = String(pair?.baseToken?.symbol || "").toUpperCase();
@@ -356,6 +378,7 @@ function dexPairEvidence(pair, provider, asset) {
   };
 }
 
+
 async function fetchDexScreener(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
   const body = await getJson(DEXSCREENER + "/latest/dex/search", {
@@ -373,6 +396,7 @@ async function fetchDexScreener(symbol, options = {}) {
   if (!pairs.length) throw new Error("no matching DEX pairs found");
   return pairs.map((pair) => dexPairEvidence(pair, "dexscreener", asset));
 }
+
 
 async function fetchGeckoTerminal(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
@@ -420,6 +444,7 @@ async function fetchGeckoTerminal(symbol, options = {}) {
   });
 }
 
+
 async function fetchAlternative(symbol, options = {}) {
   const body = await getJson(ALTERNATIVE + "/fng/?limit=2", options);
   const current = Array.isArray(body?.data) ? body.data[0] : null;
@@ -442,11 +467,12 @@ async function fetchAlternative(symbol, options = {}) {
   };
 }
 
+
 async function fetchFred(symbol, options = {}) {
   const apiKey = process.env.FRED_API_KEY;
   if (!apiKey) throw new Error("FRED_API_KEY is not configured");
   const seriesId = options.fredSeriesId || process.env.FRED_SERIES_ID || "DFF";
-  const body = await getJson(FRED + "/fเป็นred/series/observations", {
+  const body = await getJson(FRED + "/fred/series/observations", {
     ...options,
     params: {
       series_id: seriesId,
@@ -473,9 +499,11 @@ async function fetchFred(symbol, options = {}) {
   };
 }
 
+
 function resolveContract(options = {}) {
   return options.contractAddress || process.env.PERPSIA_TOKEN_CONTRACT || null;
 }
+
 
 async function fetchGoPlus(symbol, options = {}) {
   const address = resolveContract(options);
@@ -514,6 +542,7 @@ async function fetchGoPlus(symbol, options = {}) {
   };
 }
 
+
 async function fetchHoneypot(symbol, options = {}) {
   const address = resolveContract(options);
   if (!address) throw new Error("token contract address is not configured");
@@ -543,10 +572,12 @@ async function fetchHoneypot(symbol, options = {}) {
   };
 }
 
+
 function parseGithubRepository(value) {
   const match = String(value || "").match(/(?:github\\.com[/:])([^/]+)\\/([^/#]+?)(?:\\.git)?$/i);
   return match ? { owner: match[1], repo: match[2] } : null;
 }
+
 
 async function fetchGithub(symbol, options = {}) {
   const repository = parseGithubRepository(options.repository || process.env.GITHUB_REPOSITORY);
@@ -582,6 +613,7 @@ async function fetchGithub(symbol, options = {}) {
   };
 }
 
+
 registerProvider({
   id: "binance",
   name: "Binance",
@@ -592,6 +624,7 @@ registerProvider({
   cacheTtlMs: 15000,
   collect: fetchBinance,
 });
+
 
 registerProvider({
   id: "bybit",
@@ -604,6 +637,7 @@ registerProvider({
   collect: fetchBybit,
 });
 
+
 registerProvider({
   id: "okx",
   name: "OKX",
@@ -614,6 +648,7 @@ registerProvider({
   cacheTtlMs: 15000,
   collect: fetchOkx,
 });
+
 
 registerProvider({
   id: "hyperliquid",
@@ -626,6 +661,7 @@ registerProvider({
   collect: fetchHyperliquid,
 });
 
+
 registerProvider({
   id: "dexscreener",
   name: "DexScreener",
@@ -636,6 +672,7 @@ registerProvider({
   cacheTtlMs: 60000,
   collect: fetchDexScreener,
 });
+
 
 registerProvider({
   id: "geckoterminal",
@@ -648,6 +685,7 @@ registerProvider({
   collect: fetchGeckoTerminal,
 });
 
+
 registerProvider({
   id: "alternative",
   name: "Alternative.me Fear & Greed",
@@ -658,6 +696,7 @@ registerProvider({
   cacheTtlMs: 300000,
   collect: fetchAlternative,
 });
+
 
 registerProvider({
   id: "fred",
@@ -670,6 +709,7 @@ registerProvider({
   collect: fetchFred,
 });
 
+
 registerProvider({
   id: "goplus",
   name: "GoPlus Security",
@@ -680,6 +720,7 @@ registerProvider({
   cacheTtlMs: 900000,
   collect: fetchGoPlus,
 });
+
 
 registerProvider({
   id: "honeypot",
@@ -692,6 +733,7 @@ registerProvider({
   collect: fetchHoneypot,
 });
 
+
 registerProvider({
   id: "github",
   name: "GitHub public API",
@@ -702,6 +744,7 @@ registerProvider({
   cacheTtlMs: 900000,
   collect: fetchGithub,
 });
+
 
 function defaultProviderIds(options = {}) {
   if (Array.isArray(options.providers) && options.providers.length) return options.providers;
@@ -715,6 +758,7 @@ function defaultProviderIds(options = {}) {
   }
   return ids;
 }
+
 
 async function collectMarketEvidence(symbol, options = {}) {
   const context = {
@@ -735,6 +779,7 @@ async function collectMarketEvidence(symbol, options = {}) {
     })),
   };
 }
+
 
 module.exports = {
   collectMarketEvidence,
