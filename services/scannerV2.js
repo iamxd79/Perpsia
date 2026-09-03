@@ -32,10 +32,28 @@ function parseToolResult(result) {
   }
 
   try {
-    return JSON.parse(textBlock.text);
-  } catch {
-    console.error("Failed to parse CMC response:", textBlock.text);
-    throw new Error("CMC response was not valid JSON");
+    const parsed = JSON.parse(textBlock.text);
+    
+    // 🔍 DEBUG LOGGING
+    console.log("\n=== CMC RESPONSE DEBUG ===");
+    console.log("Full response structure keys:", Object.keys(parsed));
+    
+    if (parsed.result?.data) {
+      console.log("Result.data keys:", Object.keys(parsed.result.data));
+      console.log("Decision report preview:", JSON.stringify(parsed.result.data.decision_report || {}).slice(0, 300));
+    }
+    
+    if (parsed.output) {
+      console.log("Output (string) preview:", String(parsed.output).slice(0, 300));
+    }
+    
+    console.log("=== END DEBUG ===\n");
+    
+    return parsed;
+  } catch (error) {
+    console.error("❌ Failed to parse CMC response");
+    console.error("Response text (first 500 chars):", String(textBlock.text).slice(0, 500));
+    throw new Error("CMC response was not valid JSON: " + error.message);
   }
 }
 
@@ -103,11 +121,20 @@ async function executeSkillWithFallback(skillName, params, onProgress) {
 }
 
 function getReportText(payload) {
-  const report = payload?.result?.data?.decision_report;
+  // Try multiple paths where decision_report might be
+  let report = 
+    payload?.result?.data?.decision_report ||
+    payload?.decision_report ||
+    payload?.analysis ||
+    payload;
 
-  return `${report?.conclusion || ""}
+  if (typeof report === "object") {
+    const conclusion = report?.conclusion || "";
+    const analysis = report?.analysis || "";
+    return `${conclusion}\n\n${analysis}`;
+  }
 
-${report?.analysis || ""}`;
+  return String(report || "");
 }
 
 function textIncludesAny(text, words) {
@@ -235,12 +262,20 @@ ${orderbookText}
 ${mtfText}
 `;
 
+  console.log(`\n🔍 DEBUG: Classifying $${symbol}`);
+  console.log("Accumulation text length:", accumulationText.length);
+  console.log("Perp text length:", perpText.length);
+  console.log("Combined text length:", allText.length);
+  console.log("Combined text preview:", allText.slice(0, 300));
+
   const price = parseNumber(allText, /current price\s+([0-9.]+)/i);
   const funding = parseNumber(allText, /funding\s+(-?[0-9.]+)%/i);
   const priceChange = parseNumber(allText, /price change\s+(-?[0-9.]+)%/i);
   const oiChange = parseNumber(allText, /OI change\s+(-?[0-9.]+)%/i);
   const upside = parseNumber(allText, /top upside pressure is\s+([0-9.]+)/i);
   const downside = parseNumber(allText, /top downside pressure is\s+([0-9.]+)/i);
+
+  console.log("Parsed fields:", { price, funding, priceChange, oiChange, upside, downside });
 
   const hasCoreData =
     price !== null &&
@@ -278,9 +313,15 @@ ${mtfText}
     "spot-led downside",
   ]);
 
-  const mtfBullish = textIncludesAny(mtfText, ["full bullish", "bullish bias"]);
+  const mtfBullish = textIncludesAny(mtfText, [
+    "full bullish",
+    "bullish bias",
+  ]);
 
-  const mtfBearish = textIncludesAny(mtfText, ["full bearish", "bearish bias"]);
+  const mtfBearish = textIncludesAny(mtfText, [
+    "full bearish",
+    "bearish bias",
+  ]);
 
   const orderbookBullish = textIncludesAny(orderbookText, [
     "buyers are defending",
