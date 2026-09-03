@@ -3,6 +3,10 @@
 
 
 
+
+
+
+
 const axios = require("axios");
 const {
   collectProviders,
@@ -11,6 +15,11 @@ const {
   getProviderHealth,
   registerProvider,
 } = require("./registry");
+const { normalizeEvidence } = require("./evidence");
+
+
+
+
 
 
 
@@ -31,11 +40,19 @@ const GITHUB = "https://api.github.com";
 
 
 
+
+
+
+
 function number(value) {
   if (value === null || value === undefined || value === "") return null;
   const result = Number(value);
   return Number.isFinite(result) ? result : null;
 }
+
+
+
+
 
 
 
@@ -53,9 +70,17 @@ function normalizeAssetSymbol(raw) {
 
 
 
+
+
+
+
 function asUsdtSymbol(raw) {
   return normalizeAssetSymbol(raw) + "USDT";
 }
+
+
+
+
 
 
 
@@ -67,9 +92,17 @@ function asOkxSwap(raw) {
 
 
 
+
+
+
+
 function asOkxSpot(raw) {
   return normalizeAssetSymbol(raw) + "-USDT";
 }
+
+
+
+
 
 
 
@@ -94,6 +127,10 @@ function depthSummary(book) {
 
 
 
+
+
+
+
 function bybitDepthSummary(book) {
   return depthSummary({
     bids: book?.b || [],
@@ -104,12 +141,20 @@ function bybitDepthSummary(book) {
 
 
 
+
+
+
+
 function okxDepthSummary(book) {
   return depthSummary({
     bids: book?.bids || [],
     asks: book?.asks || [],
   });
 }
+
+
+
+
 
 
 
@@ -125,9 +170,17 @@ function hyperliquidDepthSummary(book) {
 
 
 
+
+
+
+
 function responseData(response) {
   return response?.data ?? response;
 }
+
+
+
+
 
 
 
@@ -140,6 +193,10 @@ async function getJson(url, options = {}) {
   });
   return responseData(response);
 }
+
+
+
+
 
 
 
@@ -158,9 +215,17 @@ async function postJson(url, body, options = {}) {
 
 
 
+
+
+
+
 function settledValue(result) {
   return result?.status === "fulfilled" ? result.value : null;
 }
+
+
+
+
 
 
 
@@ -169,6 +234,10 @@ function evidenceStatus(price, availableCount) {
   if (availableCount === 0) throw new Error("provider returned no usable response");
   return price === null ? "degraded" : "ok";
 }
+
+
+
+
 
 
 
@@ -214,6 +283,10 @@ async function fetchBinance(symbol, options = {}) {
     },
   };
 }
+
+
+
+
 
 
 
@@ -270,6 +343,10 @@ async function fetchBybit(symbol, options = {}) {
     },
   };
 }
+
+
+
+
 
 
 
@@ -335,6 +412,10 @@ async function fetchOkx(symbol, options = {}) {
 
 
 
+
+
+
+
 async function fetchHyperliquid(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
   const [metaResponse, bookResponse] = await Promise.all([
@@ -376,12 +457,20 @@ async function fetchHyperliquid(symbol, options = {}) {
 
 
 
+
+
+
+
 function pairScore(pair, asset) {
   const base = String(pair?.baseToken?.symbol || "").toUpperCase();
   const quote = String(pair?.quoteToken?.symbol || "").toUpperCase();
   const exact = base === asset ? 1000000000 : quote === asset ? 500000000 : 0;
   return exact + (number(pair?.liquidity?.usd) || 0) + (number(pair?.volume?.h24) || 0);
 }
+
+
+
+
 
 
 
@@ -425,6 +514,10 @@ function dexPairEvidence(pair, provider, asset) {
 
 
 
+
+
+
+
 async function fetchDexScreener(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
   const body = await getJson(DEXSCREENER + "/latest/dex/search", {
@@ -442,6 +535,10 @@ async function fetchDexScreener(symbol, options = {}) {
   if (!pairs.length) throw new Error("no matching DEX pairs found");
   return pairs.map((pair) => dexPairEvidence(pair, "dexscreener", asset));
 }
+
+
+
+
 
 
 
@@ -495,6 +592,10 @@ async function fetchGeckoTerminal(symbol, options = {}) {
 
 
 
+
+
+
+
 async function fetchAlternative(symbol, options = {}) {
   const body = await getJson(ALTERNATIVE + "/fng/?limit=2", options);
   const current = Array.isArray(body?.data) ? body.data[0] : null;
@@ -516,6 +617,10 @@ async function fetchAlternative(symbol, options = {}) {
     },
   };
 }
+
+
+
+
 
 
 
@@ -554,9 +659,17 @@ async function fetchFred(symbol, options = {}) {
 
 
 
+
+
+
+
 function resolveContract(options = {}) {
   return options.contractAddress || process.env.PERPSIA_TOKEN_CONTRACT || null;
 }
+
+
+
+
 
 
 
@@ -601,6 +714,10 @@ async function fetchGoPlus(symbol, options = {}) {
 
 
 
+
+
+
+
 async function fetchHoneypot(symbol, options = {}) {
   const address = resolveContract(options);
   if (!address) throw new Error("token contract address is not configured");
@@ -633,10 +750,18 @@ async function fetchHoneypot(symbol, options = {}) {
 
 
 
+
+
+
+
 function parseGithubRepository(value) {
   const match = String(value || "").match(/github[.]com[/:]([^/]+)[/]([^/#]+?)(?:[.]git)?$/i);
   return match ? { owner: match[1], repo: match[2] } : null;
 }
+
+
+
+
 
 
 
@@ -648,11 +773,19 @@ async function fetchGithub(symbol, options = {}) {
   const [repo, commits] = await Promise.all([
     getJson(GITHUB + "/repos/" + slug, {
       ...options,
-      headers: { Accept: "application/vnd.github+json", "User-Agent": "PerpsIA" },
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "PerpsIA",
+        ...(process.env.GITHUB_TOKEN ? { Authorization: "Bearer " + process.env.GITHUB_TOKEN } : {}),
+      },
     }),
     getJson(GITHUB + "/repos/" + slug + "/commits", {
       ...options,
-      headers: { Accept: "application/vnd.github+json", "User-Agent": "PerpsIA" },
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "PerpsIA",
+        ...(process.env.GITHUB_TOKEN ? { Authorization: "Bearer " + process.env.GITHUB_TOKEN } : {}),
+      },
       params: { per_page: 1 },
     }),
   ]);
@@ -678,6 +811,10 @@ async function fetchGithub(symbol, options = {}) {
 
 
 
+
+
+
+
 registerProvider({
   id: "binance",
   name: "Binance",
@@ -688,6 +825,10 @@ registerProvider({
   cacheTtlMs: 15000,
   collect: fetchBinance,
 });
+
+
+
+
 
 
 
@@ -706,6 +847,10 @@ registerProvider({
 
 
 
+
+
+
+
 registerProvider({
   id: "okx",
   name: "OKX",
@@ -716,6 +861,10 @@ registerProvider({
   cacheTtlMs: 15000,
   collect: fetchOkx,
 });
+
+
+
+
 
 
 
@@ -734,6 +883,10 @@ registerProvider({
 
 
 
+
+
+
+
 registerProvider({
   id: "dexscreener",
   name: "DexScreener",
@@ -744,6 +897,10 @@ registerProvider({
   cacheTtlMs: 60000,
   collect: fetchDexScreener,
 });
+
+
+
+
 
 
 
@@ -762,6 +919,10 @@ registerProvider({
 
 
 
+
+
+
+
 registerProvider({
   id: "alternative",
   name: "Alternative.me Fear & Greed",
@@ -772,6 +933,10 @@ registerProvider({
   cacheTtlMs: 300000,
   collect: fetchAlternative,
 });
+
+
+
+
 
 
 
@@ -790,6 +955,10 @@ registerProvider({
 
 
 
+
+
+
+
 registerProvider({
   id: "goplus",
   name: "GoPlus Security",
@@ -800,6 +969,10 @@ registerProvider({
   cacheTtlMs: 900000,
   collect: fetchGoPlus,
 });
+
+
+
+
 
 
 
@@ -818,6 +991,10 @@ registerProvider({
 
 
 
+
+
+
+
 registerProvider({
   id: "github",
   name: "GitHub public API",
@@ -832,6 +1009,10 @@ registerProvider({
 
 
 
+
+
+
+
 function defaultProviderIds(options = {}) {
   if (Array.isArray(options.providers) && options.providers.length) return options.providers;
   if (process.env.PERPSIA_PROVIDER_LIST) {
@@ -840,10 +1021,16 @@ function defaultProviderIds(options = {}) {
   const ids = ["binance", "bybit", "okx", "hyperliquid", "dexscreener", "alternative"];
   if (options.includeGecko || process.env.PERPSIA_ENABLE_GECKO === "true") ids.push("geckoterminal");
   if (options.includeOptional || process.env.PERPSIA_ENABLE_OPTIONAL_PROVIDERS === "true") {
-    ids.push("fred", "goplus", "honeypot", "github");
+    if (process.env.FRED_API_KEY) ids.push("fred");
+    if (options.contractAddress || process.env.PERPSIA_TOKEN_CONTRACT) ids.push("goplus", "honeypot");
+    if (options.repository || process.env.GITHUB_REPOSITORY) ids.push("github");
   }
   return ids;
 }
+
+
+
+
 
 
 
@@ -855,10 +1042,24 @@ async function collectMarketEvidence(symbol, options = {}) {
     cacheKey: options.cacheKey || normalizeAssetSymbol(symbol),
   };
   const records = await collectProviders(defaultProviderIds(options), context);
+  const cmcEvidence = options.cmcEvidence
+    ? normalizeEvidence({
+        provider: "coinmarketcap",
+        symbol: context.symbol,
+        sourceConfidence: 0.92,
+        status: "ok",
+        ...options.cmcEvidence,
+        metadata: {
+          integration: "CoinMarketCap Skill Hub",
+          ...(options.cmcEvidence.metadata || {}),
+        },
+      })
+    : null;
+  const allRecords = cmcEvidence ? [cmcEvidence, ...records] : records;
   return {
-    records,
-    summary: getEvidenceSummary(records),
-    sources: records.map((record) => ({
+    records: allRecords,
+    summary: getEvidenceSummary(allRecords),
+    sources: allRecords.map((record) => ({
       provider: record.provider,
       status: record.status,
       timestamp: record.timestamp,
@@ -867,6 +1068,10 @@ async function collectMarketEvidence(symbol, options = {}) {
     })),
   };
 }
+
+
+
+
 
 
 
