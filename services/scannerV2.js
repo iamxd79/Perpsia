@@ -1686,7 +1686,7 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
 
 
 
-    if (lower.includes("primary ranked candidates")) {
+    if (lower.includes("primary ranked candidates") || lower.includes("ranked primary candidates") || lower.includes("ranked candidates")) {
       inPrimarySection = true;
       continue;
     }
@@ -4715,5 +4715,6 @@ module.exports = {
   normalizeSymbol,
   executeSkillWithFallback,
   getCachedResult,
+  extractSymbolsFromScan,
   ResultCache: resultCache,
 };
