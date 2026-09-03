@@ -1,9 +1,9 @@
 {
   "name": "perpsia-terminal",
-  "version": "1.0.0",
+  "version": "2.1.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
