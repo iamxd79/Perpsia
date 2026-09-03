@@ -4,7 +4,7 @@
 // Integrates live CMC Skill Hub execution with fallback caching
 
 const { executeSkill } = require("./cmcClient");
-const { buildCMCParams, normalizeVenue } = require("./exchangeAdapter");
+const { buildCMCParams, buildPerpAnalysisParams, normalizeVenue } = require("./exchangeAdapter");
 const { RequestQueue } = require("./queue");
 
 const ACTIVE_SIGNAL_SCORE = 70;
@@ -312,18 +312,18 @@ async function analyzeLiquidationFlow(
   timeframe = "4h",
   lookback = "7d",
   venue = "Binance",
-  referencePrice = null
+  referencePrice = null,
+  sourcePayload = null
 ) {
-  const params = buildCMCParams(symbol, venue, {
+  const params = buildPerpAnalysisParams(symbol, venue, {
     timeframe: String(timeframe || "4h"),
     lookback_days: parseLookbackDays(lookback),
   });
 
   try {
-    const payload = await executeSkillWithFallback(
-      "analyze_liquidation_zones",
-      params
-    );
+    const payload =
+      sourcePayload ||
+      (await executeSkillWithFallback("perp_contract_analysis", params));
 
     return parseLiquidationFlow(payload, referencePrice);
   } catch (error) {
@@ -346,7 +346,6 @@ async function analyzeLiquidationFlow(
     };
   }
 }
-
 
 function stringifyReadable(value) {
   if (value === null || value === undefined || value === "") return "";
@@ -1017,7 +1016,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
         message: `📊 Reading $${symbol} OI, funding, CVD and liquidations...`,
       });
 
-      const perpParams = buildCMCParams(symbol, venue, {
+      const perpParams = buildPerpAnalysisParams(symbol, venue, {
         timeframe: "4h",
         liq_range: "3d",
         lookback_days: 14,
@@ -1045,7 +1044,8 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
         "4h",
         "7d",
         venue,
-        referencePrice
+        referencePrice,
+        perp
       );
 
       await onProgress({
@@ -1068,10 +1068,10 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
         message: `🕒 Checking $${symbol} 1h / 4h / 1d trend alignment...`,
       });
 
-      const mtfParams = buildCMCParams(symbol, venue, {
+      const mtfParams = {
         token_id_or_symbol: symbol,
         timeframes: ["1h", "4h", "1d"],
-      });
+      };
 
       const mtf = await executeSkillWithFallback(
         "analyze_multi_timeframe_trend_alignment",
@@ -1147,7 +1147,7 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
     message: `📊 Reading $${symbol} OI, funding, CVD and liquidations...`,
   });
 
-  const perpParams = buildCMCParams(symbol, venue, {
+  const perpParams = buildPerpAnalysisParams(symbol, venue, {
     timeframe: "4h",
     liq_range: "3d",
     lookback_days: 14,
@@ -1175,7 +1175,8 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
     "4h",
     "7d",
     venue,
-    referencePrice
+    referencePrice,
+    perp
   );
 
   await onProgress({
@@ -1198,10 +1199,10 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
     message: `🕒 Checking $${symbol} 1h / 4h / 1d trend...`,
   });
 
-  const mtfParams = buildCMCParams(symbol, venue, {
+  const mtfParams = {
     token_id_or_symbol: symbol,
     timeframes: ["1h", "4h", "1d"],
-  });
+  };
 
   const mtf = await executeSkillWithFallback(
     "analyze_multi_timeframe_trend_alignment",
