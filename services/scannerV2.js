@@ -6,6 +6,10 @@
 
 
 
+
+
+
+
 const { executeSkill } = require("./cmcClient");
 const { buildCMCParams, buildPerpAnalysisParams, normalizeVenue } = require("./exchangeAdapter");
 const { analyzeDivergence } = require("./divergence");
@@ -17,9 +21,17 @@ const { collectMarketEvidence } = require("./providers/publicProviders");\nconst
 
 
 
+
+
+
+
 const ACTIVE_SIGNAL_SCORE = 70;
 const WATCHLIST_SCORE = 40;
 const MAX_SCAN_CANDIDATES = 8;
+
+
+
+
 
 
 
@@ -30,8 +42,16 @@ const skillQueue = new RequestQueue(1, 1);
 
 
 
+
+
+
+
 // Simple in-memory cache for fallback
 const resultCache = new Map();
+
+
+
+
 
 
 
@@ -46,6 +66,10 @@ function normalizeSymbol(symbol) {
 
 
 
+
+
+
+
 function parseJsonText(value) {
   if (typeof value !== "string") return null;
   try {
@@ -54,6 +78,8 @@ function parseJsonText(value) {
     return null;
   }
 }
+
+
 
 
 function expandJsonStrings(value, depth = 0) {
@@ -77,6 +103,8 @@ function expandJsonStrings(value, depth = 0) {
 }
 
 
+
+
 function formatProviderError(error) {
   if (!error) return "Unknown provider error";
   if (typeof error === "string") return error;
@@ -85,8 +113,12 @@ function formatProviderError(error) {
 }
 
 
+
+
 function parseToolResult(result) {
   const textBlock = result?.content?.find((item) => item.type === "text");
+
+
 
 
   if (result?.isError) {
@@ -97,7 +129,11 @@ function parseToolResult(result) {
   }
 
 
+
+
   let parsed = result?.structuredContent;
+
+
 
 
   if (parsed === undefined) {
@@ -106,12 +142,18 @@ function parseToolResult(result) {
     }
 
 
+
+
     parsed = parseJsonText(textBlock.text);
     if (parsed === null) parsed = { output: textBlock.text };
   }
 
 
+
+
   parsed = expandJsonStrings(parsed);
+
+
 
 
   const providerError =
@@ -121,13 +163,19 @@ function parseToolResult(result) {
     parsed?.output?.error;
 
 
+
+
   if (providerError) {
     throw new Error("CMC Skill Hub error: " + formatProviderError(providerError));
   }
 
 
+
+
   console.log("\\n=== CMC RESPONSE DEBUG ===");
   console.log("Full response structure keys:", Object.keys(parsed || {}));
+
+
 
 
   if (parsed?.result?.data) {
@@ -139,9 +187,13 @@ function parseToolResult(result) {
   }
 
 
+
+
   if (parsed?.output) {
     console.log("Output preview:", String(parsed.output).slice(0, 300));
   }
+
+
 
 
   console.log("=== END DEBUG ===\\n");
@@ -149,8 +201,14 @@ function parseToolResult(result) {
 }
 
 
+
+
 function getCachedResult(cacheKey) {
   const cached = resultCache.get(cacheKey);
+
+
+
+
 
 
 
@@ -163,9 +221,17 @@ function getCachedResult(cacheKey) {
 
 
 
+
+
+
+
   resultCache.delete(cacheKey);
   return null;
 }
+
+
+
+
 
 
 
@@ -180,11 +246,19 @@ function setCachedResult(cacheKey, data) {
 
 
 
+
+
+
+
 /**
  * Execute CMC skill with fallback to cache
  */
 async function executeSkillWithFallback(skillName, params, onProgress) {
   const cacheKey = `${skillName}:${JSON.stringify(params)}`;
+
+
+
+
 
 
 
@@ -199,6 +273,10 @@ async function executeSkillWithFallback(skillName, params, onProgress) {
 
 
 
+
+
+
+
     const result = await skillQueue.add(async () => {
       return await executeSkill(skillName, params);
     });
@@ -206,8 +284,16 @@ async function executeSkillWithFallback(skillName, params, onProgress) {
 
 
 
+
+
+
+
     const parsed = parseToolResult(result);
     setCachedResult(cacheKey, parsed);
+
+
+
+
 
 
 
@@ -219,13 +305,25 @@ async function executeSkillWithFallback(skillName, params, onProgress) {
 
 
 
+
+
+
+
     const cached = getCachedResult(cacheKey);
+
+
+
+
 
 
 
 
     if (cached) {
       console.log(`Using cached result for ${skillName}`);
+
+
+
+
 
 
 
@@ -239,8 +337,16 @@ async function executeSkillWithFallback(skillName, params, onProgress) {
 
 
 
+
+
+
+
       return cached;
     }
+
+
+
+
 
 
 
@@ -254,9 +360,17 @@ async function executeSkillWithFallback(skillName, params, onProgress) {
 
 
 
+
+
+
+
 function normalizeKey(key) {
   return String(key || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
+
+
+
+
 
 
 
@@ -269,8 +383,16 @@ function collectObjects(value, seen = new Set(), output = [], depth = 0) {
 
 
 
+
+
+
+
   seen.add(value);
   output.push(value);
+
+
+
+
 
 
 
@@ -288,14 +410,26 @@ function collectObjects(value, seen = new Set(), output = [], depth = 0) {
 
 
 
+
+
+
+
   return output;
 }
 
 
 
 
+
+
+
+
 function readStructuredValue(payloads, aliases) {
   const wanted = new Set(aliases.map(normalizeKey));
+
+
+
+
 
 
 
@@ -311,8 +445,16 @@ function readStructuredValue(payloads, aliases) {
 
 
 
+
+
+
+
   return null;
 }
+
+
+
+
 
 
 
@@ -326,9 +468,17 @@ function toFiniteNumber(value) {
 
 
 
+
+
+
+
   if (typeof scalar === "number") {
     return Number.isFinite(scalar) ? scalar : null;
   }
+
+
+
+
 
 
 
@@ -340,9 +490,17 @@ function toFiniteNumber(value) {
 
 
 
+
+
+
+
   const parsed = Number.parseFloat(
     String(scalar).replace(/,/g, "").replace(/[$%]/g, "").replace(/−/g, "-").trim()
   );
+
+
+
+
 
 
 
@@ -353,9 +511,17 @@ function toFiniteNumber(value) {
 
 
 
+
+
+
+
 function readMetric(payloads, aliases) {
   return toFiniteNumber(readStructuredValue(payloads, aliases));
 }
+
+
+
+
 
 
 
@@ -368,11 +534,19 @@ function parseLookbackDays(lookback) {
 
 
 
+
+
+
+
 function parseLiquidationFlow(payload, referencePrice = null) {
   const price =
     referencePrice !== null
       ? toFiniteNumber(referencePrice)
       : readMetric([payload], ["current_price", "mark_price", "last_price", "price"]);
+
+
+
+
 
 
 
@@ -411,6 +585,10 @@ function parseLiquidationFlow(payload, referencePrice = null) {
 
 
 
+
+
+
+
   const recentLiqs = findArraysByKey(payload, [
     "recent_liquidations",
     "recent_liqs",
@@ -424,6 +602,10 @@ function parseLiquidationFlow(payload, referencePrice = null) {
 
 
 
+
+
+
+
   const longZoneAbove =
     price !== null && longLiqZone !== null && longLiqZone > price;
   const shortZoneBelow =
@@ -432,8 +614,16 @@ function parseLiquidationFlow(payload, referencePrice = null) {
 
 
 
+
+
+
+
   let score = 0;
   const reasons = [];
+
+
+
+
 
 
 
@@ -452,6 +642,10 @@ function parseLiquidationFlow(payload, referencePrice = null) {
 
 
 
+
+
+
+
   if (shortZoneBelow) {
     const distance = Math.round((1 - shortLiqZone / price) * 100);
     score += 25;
@@ -466,9 +660,17 @@ function parseLiquidationFlow(payload, referencePrice = null) {
 
 
 
+
+
+
+
   const hasData =
     price !== null &&
     (longLiqZone !== null || shortLiqZone !== null || recentLiqs.length > 0);
+
+
+
+
 
 
 
@@ -478,6 +680,10 @@ function parseLiquidationFlow(payload, referencePrice = null) {
     : longZoneAbove
     ? "LONG_CROWDING_RISK"
     : "NONE";
+
+
+
+
 
 
 
@@ -499,6 +705,10 @@ function parseLiquidationFlow(payload, referencePrice = null) {
 
 
 
+
+
+
+
 async function analyzeLiquidationFlow(
   symbol,
   timeframe = "4h",
@@ -515,10 +725,18 @@ async function analyzeLiquidationFlow(
 
 
 
+
+
+
+
   try {
     const payload =
       sourcePayload ||
       (await executeSkillWithFallback("perp_contract_analysis", params));
+
+
+
+
 
 
 
@@ -528,6 +746,10 @@ async function analyzeLiquidationFlow(
     console.warn(
       "Liquidation flow unavailable for " + symbol + ": " + error.message
     );
+
+
+
+
 
 
 
@@ -551,6 +773,10 @@ async function analyzeLiquidationFlow(
 
 
 
+
+
+
+
 function stringifyReadable(value) {
   if (value === null || value === undefined || value === "") return "";
   if (typeof value === "string") return value;
@@ -564,9 +790,17 @@ function stringifyReadable(value) {
 
 
 
+
+
+
+
 function findArraysByKey(payload, aliases) {
   const wanted = new Set(aliases.map(normalizeKey));
   const arrays = [];
+
+
+
+
 
 
 
@@ -582,8 +816,16 @@ function findArraysByKey(payload, aliases) {
 
 
 
+
+
+
+
   return arrays;
 }
+
+
+
+
 
 
 
@@ -604,9 +846,17 @@ function coerceSymbol(value) {
 
 
 
+
+
+
+
   const text = String(value || "").trim();
   const separators = [" ", "(", ":", ","];
   let end = text.length;
+
+
+
+
 
 
 
@@ -619,8 +869,16 @@ function coerceSymbol(value) {
 
 
 
+
+
+
+
   return normalizeSymbol(text.slice(0, end));
 }
+
+
+
+
 
 
 
@@ -637,8 +895,16 @@ function unwrapSkillData(payload) {
 
 
 
+
+
+
+
 function getDecisionReport(payload) {
   const data = unwrapSkillData(payload);
+
+
+
+
 
 
 
@@ -650,6 +916,10 @@ function getDecisionReport(payload) {
     null
   );
 }
+
+
+
+
 
 
 
@@ -666,12 +936,20 @@ function getReportText(payload) {
 
 
 
+
+
+
+
   if (report && typeof report === "object") {
     const parts = [
       stringifyReadable(report.conclusion),
       stringifyReadable(report.analysis),
       stringifyReadable(report.action_guidance),
     ].filter(Boolean);
+
+
+
+
 
 
 
@@ -684,8 +962,16 @@ function getReportText(payload) {
 
 
 
+
+
+
+
   return String(report || "");
 }
+
+
+
+
 
 
 
@@ -698,6 +984,10 @@ function getDecisionAnalysis(payload) {
 
 
 
+
+
+
+
 function textIncludesAny(text, words) {
   if (!text) return false;
   return words.some((word) => text.toLowerCase().includes(word.toLowerCase()));
@@ -706,8 +996,16 @@ function textIncludesAny(text, words) {
 
 
 
+
+
+
+
 function cleanRead(text) {
   if (!text) return "No clean market summary returned.";
+
+
+
+
 
 
 
@@ -722,9 +1020,17 @@ function cleanRead(text) {
 
 
 
+
+
+
+
 function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
   const analysis = getDecisionAnalysis(scanPayload);
   if (!analysis) return [];
+
+
+
+
 
 
 
@@ -735,9 +1041,17 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
 
 
 
+
+
+
+
   for (const rawLine of analysis.split(String.fromCharCode(10))) {
     const line = rawLine.replaceAll(String.fromCharCode(13), "").trim();
     const lower = line.toLowerCase();
+
+
+
+
 
 
 
@@ -750,6 +1064,10 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
 
 
 
+
+
+
+
     if (inPrimarySection && line.startsWith("###")) {
       inPrimarySection = false;
       continue;
@@ -758,7 +1076,15 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
 
 
 
+
+
+
+
     if (!inPrimarySection) continue;
+
+
+
+
 
 
 
@@ -771,9 +1097,17 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
 
 
 
+
+
+
+
     const markerStart = line.indexOf("**", dot + 1);
     const markerEnd = markerStart < 0 ? -1 : line.indexOf("**", markerStart + 2);
     if (markerStart < 0 || markerEnd < 0) continue;
+
+
+
+
 
 
 
@@ -787,8 +1121,16 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
 
 
 
+
+
+
+
   return symbols;
 }
+
+
+
+
 
 
 
@@ -811,6 +1153,10 @@ function extractSymbolsFromScan(scanPayload) {
     "NEUTRAL",
     "WATCHLIST",
   ]);
+
+
+
+
 
 
 
@@ -838,6 +1184,10 @@ function extractSymbolsFromScan(scanPayload) {
 
 
 
+
+
+
+
   for (const candidates of arrays) {
     for (const candidate of candidates) {
       const raw =
@@ -849,11 +1199,19 @@ function extractSymbolsFromScan(scanPayload) {
 
 
 
+
+
+
+
       if (symbol && !blacklist.has(symbol)) {
         symbols.push(symbol);
       }
     }
   }
+
+
+
+
 
 
 
@@ -870,6 +1228,10 @@ function extractSymbolsFromScan(scanPayload) {
 
 
 
+
+
+
+
   if (!symbols.length) {
     symbols.push(...extractSymbolsFromDecisionReport(scanPayload, blacklist));
   }
@@ -877,8 +1239,16 @@ function extractSymbolsFromScan(scanPayload) {
 
 
 
+
+
+
+
   return [...new Set(symbols)].slice(0, MAX_SCAN_CANDIDATES);
 }
+
+
+
+
 
 
 
@@ -897,9 +1267,17 @@ function buildConfirmationNeeded({
 
 
 
+
+
+
+
   if (oiChange === null || oiChange < 40) {
     confirmationNeeded.push("Fresh OI expansion with price confirmation");
   }
+
+
+
+
 
 
 
@@ -911,9 +1289,17 @@ function buildConfirmationNeeded({
 
 
 
+
+
+
+
   if (direction === "Bearish" && !mtfBearish) {
     confirmationNeeded.push("Cleaner bearish multi-timeframe alignment");
   }
+
+
+
+
 
 
 
@@ -925,9 +1311,17 @@ function buildConfirmationNeeded({
 
 
 
+
+
+
+
   if (direction === "Bearish" && !orderbookBearish) {
     confirmationNeeded.push("Stronger seller pressure in the orderbook");
   }
+
+
+
+
 
 
 
@@ -939,9 +1333,17 @@ function buildConfirmationNeeded({
 
 
 
+
+
+
+
   if (!confirmationNeeded.length) {
     confirmationNeeded.push("Sustained price confirmation");
   }
+
+
+
+
 
 
 
@@ -952,8 +1354,16 @@ function buildConfirmationNeeded({
 
 
 
+
+
+
+
 function classifyCandidate(symbol, packs) {
   symbol = normalizeSymbol(symbol);
+
+
+
+
 
 
 
@@ -972,6 +1382,10 @@ function classifyCandidate(symbol, packs) {
 
 
 
+
+
+
+
   const allText = `
 ${accumulationText}
 ${perpText}
@@ -982,11 +1396,19 @@ ${mtfText}
 
 
 
+
+
+
+
   console.log(`\n🔍 DEBUG: Classifying $${symbol}`);
   console.log("Accumulation text length:", accumulationText.length);
   console.log("Perp text length:", perpText.length);
   console.log("Combined text length:", allText.length);
   console.log("Combined text preview:", allText.slice(0, 300));
+
+
+
+
 
 
 
@@ -1002,7 +1424,19 @@ ${mtfText}
 
 
 
+
+
+
+
   console.log("Parsed fields:", { price, funding, priceChange, oiChange, upside, downside });
+
+
+
+
+
+
+
+
 
 
 
@@ -1020,6 +1454,10 @@ ${mtfText}
 
 
 
+
+
+
+
   const isEarly = textIncludesAny(accumulationText, [
     "warming",
     "starting to break out",
@@ -1031,12 +1469,20 @@ ${mtfText}
 
 
 
+
+
+
+
   const isOverextended =
     textIncludesAny(accumulationText, [
       "already overextended",
       "overextended",
     ]) ||
     (priceChange !== null && Math.abs(priceChange) > 100);
+
+
+
+
 
 
 
@@ -1052,12 +1498,20 @@ ${mtfText}
 
 
 
+
+
+
+
   const bearishPerp = textIncludesAny(perpText, [
     "price_down_oi_up",
     "spot_selling_confirms_price_weakness",
     "continuation to the downside",
     "spot-led downside",
   ]);
+
+
+
+
 
 
 
@@ -1070,10 +1524,18 @@ ${mtfText}
 
 
 
+
+
+
+
   const mtfBearish = textIncludesAny(mtfText, [
     "full bearish",
     "bearish bias",
   ]);
+
+
+
+
 
 
 
@@ -1087,11 +1549,19 @@ ${mtfText}
 
 
 
+
+
+
+
   const orderbookBearish = textIncludesAny(orderbookText, [
     "sellers are capping",
     "ask overhang",
     "ask_overhang",
   ]);
+
+
+
+
 
 
 
@@ -1107,10 +1577,18 @@ ${mtfText}
 
 
 
+
+
+
+
   let direction = "Neutral";
   let category = "neutral";
   let marketState = "Neutral / No Trade";
   let score = 0;
+
+
+
+
 
 
 
@@ -1121,8 +1599,16 @@ ${mtfText}
 
 
 
+
+
+
+
   if (bullishPerp && !bearishPerp) direction = "Bullish";
   if (bearishPerp && !bullishPerp) direction = "Bearish";
+
+
+
+
 
 
 
@@ -1130,6 +1616,10 @@ ${mtfText}
   if (bullishPerp && bearishPerp) {
     conflicts.push("Perp flow contains both bullish and bearish evidence.");
   }
+
+
+
+
 
 
 
@@ -1142,10 +1632,18 @@ ${mtfText}
 
 
 
+
+
+
+
   if (oiExpanding) {
     score += 20;
     reasons.push(`Open interest expanded ${oiChange}%, showing fresh derivatives activity.`);
   }
+
+
+
+
 
 
 
@@ -1158,10 +1656,18 @@ ${mtfText}
 
 
 
+
+
+
+
   if (deeplyNegativeFunding) {
     score += bullishPerp ? 20 : 5;
     reasons.push("Funding is deeply negative, creating potential short-squeeze pressure.");
   }
+
+
+
+
 
 
 
@@ -1174,10 +1680,18 @@ ${mtfText}
 
 
 
+
+
+
+
   if (elevatedFunding) {
     score += bearishPerp ? 15 : 0;
     reasons.push("Funding is elevated, showing possible crowded long positioning.");
   }
+
+
+
+
 
 
 
@@ -1190,10 +1704,18 @@ ${mtfText}
 
 
 
+
+
+
+
   if (bearishPerp) {
     score += 15;
     reasons.push("Perp structure shows bearish pressure.");
   }
+
+
+
+
 
 
 
@@ -1206,10 +1728,18 @@ ${mtfText}
 
 
 
+
+
+
+
   if (mtfBearish) {
     score += direction === "Bearish" ? 15 : -10;
     reasons.push("Multi-timeframe trend alignment is bearish.");
   }
+
+
+
+
 
 
 
@@ -1221,9 +1751,17 @@ ${mtfText}
 
 
 
+
+
+
+
   if (direction === "Bearish" && mtfBullish) {
     conflicts.push("Bearish thesis conflicts with bullish multi-timeframe trend.");
   }
+
+
+
+
 
 
 
@@ -1236,10 +1774,18 @@ ${mtfText}
 
 
 
+
+
+
+
   if (orderbookBearish) {
     score += direction === "Bearish" ? 10 : -5;
     reasons.push("Orderbook shows seller pressure.");
   }
+
+
+
+
 
 
 
@@ -1252,10 +1798,18 @@ ${mtfText}
 
 
 
+
+
+
+
   if (priceStrongUp) {
     score -= isOverextended ? 25 : 5;
     reasons.push(`Price is already up ${priceChange}%, increasing chase risk.`);
   }
+
+
+
+
 
 
 
@@ -1268,10 +1822,18 @@ ${mtfText}
 
 
 
+
+
+
+
   if (liquidationFlow?.status === "available") {
     score += liquidationFlow.score;
     reasons.push(...liquidationFlow.reasons);
   }
+
+
+
+
 
 
 
@@ -1299,11 +1861,19 @@ ${mtfText}
 
 
 
+
+
+
+
   score += divergences.reduce(
     (total, divergence) => total + divergence.scoreAdjust,
     0
   );
   reasons.push(...divergences.map((divergence) => divergence.message));
+
+
+
+
 
 
 
@@ -1327,10 +1897,15 @@ ${mtfText}
 
 
 
+
+
+
+
   if (correlation?.status === "available") {
     score += correlation.scoreAdjust || 0;
     if (correlation.rationale) reasons.push(correlation.rationale);
   }
+
 
   score += crossSource.scoreAdjustment || 0;
   reasons.push(...crossSource.signals.map((signal) => signal.message));
@@ -1338,7 +1913,12 @@ ${mtfText}
     .filter((signal) => signal.type === "SOURCE_DISAGREEMENT")
     .map((signal) => signal.message));
 
+
   score = Math.max(0, Math.min(100, score));
+
+
+
+
 
 
 
@@ -1371,11 +1951,19 @@ ${mtfText}
 
 
 
+
+
+
+
     category = "watchlist";
   } else {
     marketState = "Neutral / No Trade";
     category = "neutral";
   }
+
+
+
+
 
 
 
@@ -1387,11 +1975,16 @@ ${mtfText}
     score = 0;
   }
 
+
   const isActionable =
     hasCoreData &&
     score >= ACTIVE_SIGNAL_SCORE &&
     (category === "long" || category === "short") &&
     !isOverextended;
+
+
+
+
 
 
 
@@ -1409,12 +2002,20 @@ ${mtfText}
 
 
 
+
+
+
+
   const entry =
     isActionable && direction === "Bullish" && downside && price
       ? `${(downside * 1.01).toFixed(6)} - ${price.toFixed(6)}`
       : isActionable && direction === "Bearish" && upside && price
       ? `${price.toFixed(6)} - ${upside.toFixed(6)}`
       : "Wait for confirmation";
+
+
+
+
 
 
 
@@ -1429,12 +2030,20 @@ ${mtfText}
 
 
 
+
+
+
+
   const tp2 =
     isActionable && direction === "Bullish" && upside
       ? (upside * 1.08).toFixed(6)
       : isActionable && direction === "Bearish" && downside
       ? (downside * 0.92).toFixed(6)
       : "N/A";
+
+
+
+
 
 
 
@@ -1449,6 +2058,10 @@ ${mtfText}
 
 
 
+
+
+
+
   return {
     symbol,
     direction,
@@ -1459,9 +2072,17 @@ ${mtfText}
 
 
 
+
+
+
+
     hasCoreData,
     isActionable,
     confirmationNeeded,
+
+
+
+
 
 
 
@@ -1488,6 +2109,10 @@ ${mtfText}
 
 
 
+
+
+
+
     conflicts,
     liquidationFlow,
     whaleActivity,
@@ -1495,6 +2120,10 @@ ${mtfText}
     divergences,
     marketEvidence,
     crossSource,
+
+
+
+
 
 
 
@@ -1507,8 +2136,16 @@ ${mtfText}
 
 
 
+
+
+
+
     upside,
     downside,
+
+
+
+
 
 
 
@@ -1521,7 +2158,15 @@ ${mtfText}
 
 
 
+
+
+
+
     reasons,
+
+
+
+
 
 
 
@@ -1536,11 +2181,19 @@ ${mtfText}
 
 
 
+
+
+
+
 /**
  * Run market scan with live CMC Skill Hub (production version)
  */
 async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
   venue = normalizeVenue(venue);
+
+
+
+
 
 
 
@@ -1554,7 +2207,15 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
   const scanParams = { preview: true };
+
+
+
+
 
 
 
@@ -1568,8 +2229,16 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
   const scanPayload = rawScan;
   const symbols = extractSymbolsFromScan(scanPayload);
+
+
+
+
 
 
 
@@ -1583,8 +2252,16 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
     throw new Error("No candidates extracted from CMC Skill Hub scan output.");
   }
+
+
+
+
 
 
 
@@ -1598,8 +2275,16 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
   const results = [];
   const errors = [];
+
+
+
+
 
 
 
@@ -1610,7 +2295,15 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
     const basePercent = 25 + Math.round((i / symbols.length) * 60);
+
+
+
+
 
 
 
@@ -1625,9 +2318,17 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
       const accumParams = buildCMCParams(symbol, venue, {
         lookback_days: 14,
       });
+
+
+
+
 
 
 
@@ -1641,11 +2342,19 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
       await onProgress({
         percent: basePercent + 5,
         stage: `$${symbol} Perp Structure`,
         message: `📊 Reading $${symbol} OI, funding, CVD and liquidations...`,
       });
+
+
+
+
 
 
 
@@ -1659,11 +2368,19 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
       const perp = await executeSkillWithFallback(
         "perp_contract_analysis",
         perpParams,
         onProgress
       );
+
+
+
+
 
 
 
@@ -1677,10 +2394,18 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
       const referencePrice = readMetric(
         [accumulation, perp],
         ["current_price", "mark_price", "last_price", "price"]
       );
+
+
+
+
 
 
 
@@ -1697,6 +2422,10 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
       await onProgress({
         percent: basePercent + 9,
         stage: "$" + symbol + " Whale Activity",
@@ -1706,7 +2435,15 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
       const whaleActivity = await checkWhaleActivity(symbol);
+
+
+
+
 
 
 
@@ -1720,7 +2457,15 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
       const orderbookParams = buildCMCParams(symbol, venue);
+
+
+
+
 
 
 
@@ -1734,6 +2479,10 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
       await onProgress({
         percent: basePercent + 13,
         stage: `$${symbol} Trend Alignment`,
@@ -1743,10 +2492,18 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
       const mtfParams = {
         token_id_or_symbol: symbol,
         timeframes: ["1h", "4h", "1d"],
       };
+
+
+
+
 
 
 
@@ -1760,11 +2517,19 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
       await onProgress({
         percent: basePercent + 15,
         stage: "$" + symbol + " Correlation",
         message: "🧭 Comparing $" + symbol + " with correlated market assets...",
       });
+
+
+
+
 
 
 
@@ -1777,6 +2542,25 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
+      await onProgress({
+        percent: basePercent + 16,
+        stage: "$" + symbol + " Multi-Source Evidence",
+        message: "🌐 Collecting public CEX, DEX and sentiment evidence...",
+      });
+
+      const marketEvidence = await collectMarketEvidence(symbol, { venue });
+      marketEvidence.sources.unshift({
+        provider: "coinmarketcap",
+        status: "ok",
+        timestamp: Date.now(),
+        fields: ["accumulation", "perpetual", "orderbook", "trend", "liquidation"],
+        attribution: "CoinMarketCap Skill Hub",
+      });
+
       const result = {
         ...classifyCandidate(symbol, {
           accumulation,
@@ -1786,6 +2570,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
           whaleActivity,
           correlation,
           mtf,
+          marketEvidence,
         }),
         venue,
       };
@@ -1793,9 +2578,17 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
       results.push(result);
     } catch (error) {
       console.error(`Failed to analyze ${symbol}:`, error.message);
+
+
+
+
 
 
 
@@ -1810,7 +2603,15 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
   results.sort((a, b) => b.score - a.score);
+
+
+
+
 
 
 
@@ -1820,6 +2621,10 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
     stage: "Market Classification",
     message: "⚡ Classifying long, short, watchlist and neutral setups...",
   });
+
+
+
+
 
 
 
@@ -1836,12 +2641,20 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
 
 
 
+
+
+
+
 /**
  * Analyze single asset with live CMC
  */
 async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => {}) {
   symbol = normalizeSymbol(symbol);
   venue = normalizeVenue(venue);
+
+
+
+
 
 
 
@@ -1855,9 +2668,17 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
+
+
+
+
   const accumParams = buildCMCParams(symbol, venue, {
     lookback_days: 14,
   });
+
+
+
+
 
 
 
@@ -1871,11 +2692,19 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
+
+
+
+
   await onProgress({
     percent: 40,
     stage: `$${symbol} Perp Structure`,
     message: `📊 Reading $${symbol} OI, funding, CVD and liquidations...`,
   });
+
+
+
+
 
 
 
@@ -1889,11 +2718,19 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
+
+
+
+
   const perp = await executeSkillWithFallback(
     "perp_contract_analysis",
     perpParams,
     onProgress
   );
+
+
+
+
 
 
 
@@ -1907,10 +2744,18 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
+
+
+
+
   const referencePrice = readMetric(
     [accumulation, perp],
     ["current_price", "mark_price", "last_price", "price"]
   );
+
+
+
+
 
 
 
@@ -1927,6 +2772,10 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
+
+
+
+
   await onProgress({
     percent: 60,
     stage: "$" + symbol + " Whale Activity",
@@ -1936,7 +2785,15 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
+
+
+
+
   const whaleActivity = await checkWhaleActivity(symbol);
+
+
+
+
 
 
 
@@ -1950,7 +2807,15 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
+
+
+
+
   const orderbookParams = buildCMCParams(symbol, venue);
+
+
+
+
 
 
 
@@ -1964,11 +2829,19 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
+
+
+
+
   await onProgress({
     percent: 85,
     stage: `$${symbol} Trend Alignment`,
     message: `🕒 Checking $${symbol} 1h / 4h / 1d trend...`,
   });
+
+
+
+
 
 
 
@@ -1979,11 +2852,17 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
   };
 
 
+
+
   const mtf = await executeSkillWithFallback(
     "analyze_multi_timeframe_trend_alignment",
     mtfParams,
     onProgress
   );
+
+
+
+
 
 
 
@@ -1997,6 +2876,10 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
+
+
+
+
   const correlation = await analyzeCorrelation(symbol, "7d", {
     executeSkill: (skillName, params) =>
       executeSkillWithFallback(skillName, params, onProgress),
@@ -2004,6 +2887,25 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
+
+
+
+
+
+  await onProgress({
+    percent: 97,
+    stage: "$" + symbol + " Multi-Source Evidence",
+    message: "🌐 Collecting public CEX, DEX and sentiment evidence...",
+  });
+
+  const marketEvidence = await collectMarketEvidence(symbol, { venue });
+  marketEvidence.sources.unshift({
+    provider: "coinmarketcap",
+    status: "ok",
+    timestamp: Date.now(),
+    fields: ["accumulation", "perpetual", "orderbook", "trend", "liquidation"],
+    attribution: "CoinMarketCap Skill Hub",
+  });
 
   return {
     ...classifyCandidate(symbol, {
@@ -2014,10 +2916,15 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
       whaleActivity,
       correlation,
       mtf,
+      marketEvidence,
     }),
     venue,
   };
 }
+
+
+
+
 
 
 
