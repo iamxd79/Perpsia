@@ -1687,7 +1687,13 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
 
 
 
-    if (lower.includes("primary ranked candidates") || lower.includes("ranked primary candidates") || lower.includes("ranked candidates")) {
+    if (
+      lower.includes("primary ranked candidates") ||
+      lower.includes("ranked primary candidates") ||
+      lower.includes("ranked candidates") ||
+      lower.includes("ranked primary candidate") ||
+      lower.includes("primary candidate queue")
+    ) {
       inPrimarySection = true;
       tableHeaders = null;
       continue;
