@@ -27,35 +27,54 @@ function normalizeSymbol(symbol) {
 function parseToolResult(result) {
   const textBlock = result?.content?.find((item) => item.type === "text");
 
-  if (!textBlock?.text) {
-    throw new Error("No text payload returned by CMC Skill Hub");
+  if (result?.isError) {
+    throw new Error(
+      "CMC Skill Hub error: " +
+        (textBlock?.text || "The provider returned an MCP tool error.")
+    );
   }
 
-  try {
-    const parsed = JSON.parse(textBlock.text);
-    
-    // 🔍 DEBUG LOGGING
-    console.log("\n=== CMC RESPONSE DEBUG ===");
-    console.log("Full response structure keys:", Object.keys(parsed));
-    
-    if (parsed.result?.data) {
-      console.log("Result.data keys:", Object.keys(parsed.result.data));
-      console.log("Decision report preview:", JSON.stringify(parsed.result.data.decision_report || {}).slice(0, 300));
+  let parsed = result?.structuredContent;
+
+  if (parsed === undefined) {
+    if (!textBlock?.text) {
+      throw new Error("No structured payload returned by CMC Skill Hub");
     }
-    
-    if (parsed.output) {
-      console.log("Output (string) preview:", String(parsed.output).slice(0, 300));
+
+    try {
+      parsed = JSON.parse(textBlock.text);
+    } catch (error) {
+      parsed = { output: textBlock.text };
     }
-    
-    console.log("=== END DEBUG ===\n");
-    
-    return parsed;
-  } catch (error) {
-    console.error("❌ Failed to parse CMC response");
-    console.error("Response text (first 500 chars):", String(textBlock.text).slice(0, 500));
-    throw new Error("CMC response was not valid JSON: " + error.message);
   }
+
+  if (parsed?.error) {
+    const code = parsed.error.code ? parsed.error.code + ": " : "";
+    throw new Error(
+      "CMC Skill Hub error: " + code + (parsed.error.message || "Unknown provider error")
+    );
+  }
+
+  console.log("\n=== CMC RESPONSE DEBUG ===");
+  console.log("Full response structure keys:", Object.keys(parsed || {}));
+
+  if (parsed?.result?.data) {
+    console.log("Result.data keys:", Object.keys(parsed.result.data));
+    console.log(
+      "Decision report preview:",
+      JSON.stringify(parsed.result.data.decision_report || {}).slice(0, 300)
+    );
+  }
+
+  if (parsed?.output) {
+    console.log("Output preview:", String(parsed.output).slice(0, 300));
+  }
+
+  console.log("=== END DEBUG ===\n");
+  return parsed;
 }
+
+function getCachedResult
 
 function getCachedResult(cacheKey) {
   const cached = resultCache.get(cacheKey);
@@ -120,22 +139,133 @@ async function executeSkillWithFallback(skillName, params, onProgress) {
   }
 }
 
+function normalizeKey(key) {
+  return String(key || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function collectObjects(value, seen = new Set(), output = [], depth = 0) {
+  if (value === null || typeof value !== "object" || depth > 8 || seen.has(value)) {
+    return output;
+  }
+
+  seen.add(value);
+  output.push(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectObjects(item, seen, output, depth + 1);
+    }
+  } else {
+    for (const child of Object.values(value)) {
+      collectObjects(child, seen, output, depth + 1);
+    }
+  }
+
+  return output;
+}
+
+function readStructuredValue(payloads, aliases) {
+  const wanted = new Set(aliases.map(normalizeKey));
+
+  for (const object of collectObjects(payloads)) {
+    for (const [key, value] of Object.entries(object)) {
+      if (wanted.has(normalizeKey(key))) {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
+function toFiniteNumber(value) {
+  const scalar =
+    value && typeof value === "object"
+      ? value.value ?? value.rate ?? value.percent ?? value.percentage ?? value.change ?? value.pct
+      : value;
+
+  if (typeof scalar === "number") {
+    return Number.isFinite(scalar) ? scalar : null;
+  }
+
+  if (scalar === null || scalar === undefined || scalar === "") {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(
+    String(scalar).replace(/,/g, "").replace(/[$%]/g, "").replace(/−/g, "-").trim()
+  );
+
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readMetric(payloads, aliases) {
+  return toFiniteNumber(readStructuredValue(payloads, aliases));
+}
+
+function stringifyReadable(value) {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function findArraysByKey(payload, aliases) {
+  const wanted = new Set(aliases.map(normalizeKey));
+  const arrays = [];
+
+  for (const object of collectObjects(payload)) {
+    for (const [key, value] of Object.entries(object)) {
+      if (wanted.has(normalizeKey(key)) && Array.isArray(value)) {
+        arrays.push(value);
+      }
+    }
+  }
+
+  return arrays;
+}
+
+function coerceSymbol(value) {
+  if (value && typeof value === "object") {
+    return coerceSymbol(
+      readStructuredValue([value], [
+        "symbol",
+        "ticker",
+        "ticker_symbol",
+        "base_symbol",
+        "token_symbol",
+      ])
+    );
+  }
+
+  return normalizeSymbol(value);
+}
+
 function getReportText(payload) {
-  // Try multiple paths where decision_report might be
-  let report = 
+  const report =
     payload?.result?.data?.decision_report ||
     payload?.decision_report ||
     payload?.analysis ||
+    payload?.output ||
     payload;
 
-  if (typeof report === "object") {
-    const conclusion = report?.conclusion || "";
-    const analysis = report?.analysis || "";
-    return `${conclusion}\n\n${analysis}`;
+  if (report && typeof report === "object") {
+    return [
+      stringifyReadable(report.conclusion),
+      stringifyReadable(report.analysis),
+      stringifyReadable(report),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
   }
 
   return String(report || "");
 }
+
+function textIncludesAny
 
 function textIncludesAny(text, words) {
   if (!text) return false;
@@ -163,20 +293,7 @@ function cleanRead(text) {
 }
 
 function extractSymbolsFromScan(scanPayload) {
-  const text = getReportText(scanPayload);
-  const rawJson = JSON.stringify(scanPayload);
-  const combinedText = `${text}\n${rawJson}`;
-
-  const matches = [
-    ...combinedText.matchAll(/\*\*([A-Z0-9]{2,15})\b/g),
-    ...combinedText.matchAll(/\$([A-Z0-9]{2,15})\b/g),
-    ...combinedText.matchAll(/\b([A-Z0-9]{2,15})\s+\(final score/gi),
-    ...combinedText.matchAll(/symbol["']?\s*:\s*["']([A-Z0-9]{2,15})["']/gi),
-    ...combinedText.matchAll(/asset["']?\s*:\s*["']([A-Z0-9]{2,15})["']/gi),
-    ...combinedText.matchAll(/ticker["']?\s*:\s*["']([A-Z0-9]{2,15})["']/gi),
-  ];
-
-  const blacklist = [
+  const blacklist = new Set([
     "OI",
     "CVD",
     "USD",
@@ -192,18 +309,55 @@ function extractSymbolsFromScan(scanPayload) {
     "SHORT",
     "NEUTRAL",
     "WATCHLIST",
+  ]);
+
+  const arrays = findArraysByKey(scanPayload, [
+    "candidates",
+    "ranked_candidates",
+    "opportunities",
+    "assets",
+    "coins",
+    "results",
+    "symbols",
+    "tickers",
+  ]);
+  const symbols = [];
+  const symbolAliases = [
+    "symbol",
+    "ticker",
+    "ticker_symbol",
+    "base_symbol",
+    "token_symbol",
+    "asset",
   ];
 
-  return [
-    ...new Set(
-      matches
-        .map((match) => normalizeSymbol(match[1]))
-        .filter(Boolean)
-    ),
-  ]
-    .filter((symbol) => !blacklist.includes(symbol))
-    .slice(0, MAX_SCAN_CANDIDATES);
+  for (const candidates of arrays) {
+    for (const candidate of candidates) {
+      const raw =
+        typeof candidate === "string"
+          ? candidate
+          : readStructuredValue([candidate], symbolAliases);
+      const symbol = coerceSymbol(raw);
+
+      if (symbol && !blacklist.has(symbol)) {
+        symbols.push(symbol);
+      }
+    }
+  }
+
+  if (!symbols.length) {
+    for (const object of collectObjects(scanPayload)) {
+      const symbol = coerceSymbol(readStructuredValue([object], symbolAliases));
+      if (symbol && !blacklist.has(symbol)) {
+        symbols.push(symbol);
+      }
+    }
+  }
+
+  return [...new Set(symbols)].slice(0, MAX_SCAN_CANDIDATES);
 }
+
+function buildConfirmationNeeded
 
 function buildConfirmationNeeded({
   direction,
@@ -268,12 +422,15 @@ ${mtfText}
   console.log("Combined text length:", allText.length);
   console.log("Combined text preview:", allText.slice(0, 300));
 
-  const price = parseNumber(allText, /current price\s+([0-9.]+)/i);
-  const funding = parseNumber(allText, /funding\s+(-?[0-9.]+)%/i);
-  const priceChange = parseNumber(allText, /price change\s+(-?[0-9.]+)%/i);
-  const oiChange = parseNumber(allText, /OI change\s+(-?[0-9.]+)%/i);
-  const upside = parseNumber(allText, /top upside pressure is\s+([0-9.]+)/i);
-  const downside = parseNumber(allText, /top downside pressure is\s+([0-9.]+)/i);
+  const metricPayloads = [packs.accumulation, packs.perp, packs.orderbook, packs.mtf];
+  const price = readMetric(metricPayloads, ["current_price", "mark_price", "last_price", "price"]);
+  const funding = readMetric(metricPayloads, ["funding", "funding_rate", "funding_percent", "funding_pct"]);
+  const priceChange = readMetric(metricPayloads, ["price_change", "price_change_24h", "price_change_percent", "price_change_pct", "change_24h"]);
+  const oiChange = readMetric(metricPayloads, ["oi_change", "oi_change_24h", "open_interest_change", "open_interest_change_percent", "open_interest_change_pct"]);
+  const upside = readMetric(metricPayloads, ["top_upside_pressure", "upside", "upside_target", "resistance"]);
+  const downside = readMetric(metricPayloads, ["top_downside_pressure", "downside", "downside_target", "support"]);
+
+  console.log("Parsed fields:", { price, funding, priceChange, oiChange, upside, downside });
 
   console.log("Parsed fields:", { price, funding, priceChange, oiChange, upside, downside });
 
@@ -581,7 +738,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
     message: "🔎 Scanning the perpetual market...",
   });
 
-  const scanParams = buildCMCParams("", venue, { preview: true });
+  const scanParams = { preview: true };
 
   const rawScan = await executeSkillWithFallback(
     "altcoin_scanner_perp",
