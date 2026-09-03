@@ -164,6 +164,28 @@ function formatLiquidationFlow(flow) {
   return lines.join(String.fromCharCode(10));
 }
 
+function formatDivergenceReport(divergences) {
+  const list = Array.isArray(divergences) ? divergences : [];
+  const lines = ["⚠️ DIVERGENCES"];
+
+  if (!list.length) {
+    lines.push("No material momentum divergence detected.");
+    return lines.join(String.fromCharCode(10));
+  }
+
+  for (const divergence of list.slice(0, 5)) {
+    const severity = String(divergence.severity || "INFO").toUpperCase();
+    const message = String(divergence.message || divergence.type || "Divergence detected.");
+    const adjustment = Number.isFinite(divergence.scoreAdjust)
+      ? " (" + (divergence.scoreAdjust > 0 ? "+" : "") + divergence.scoreAdjust + " score)"
+      : "";
+
+    lines.push("• [" + severity + "] " + message + adjustment);
+  }
+
+  return lines.join(String.fromCharCode(10));
+}
+
 function formatScanResult(result) {
   const total =
     result.longs.length +
@@ -229,6 +251,33 @@ Assets analyzed: ${total}
         "\n" +
         reason +
         "\n\n";
+    });
+  }
+
+  const divergenceSignals = [
+    ...result.longs,
+    ...result.shorts,
+    ...result.watchlist,
+    ...result.neutral,
+  ].filter((signal) => Array.isArray(signal.divergences) && signal.divergences.length);
+
+  output += "\n⚠️ DIVERGENCES\n\n";
+
+  if (!divergenceSignals.length) {
+    output += "No material momentum divergence detected.\n\n";
+  } else {
+    divergenceSignals.slice(0, 5).forEach((signal) => {
+      output += "$" + signal.symbol + "\n";
+      output += signal.divergences
+        .slice(0, 3)
+        .map((divergence) =>
+          "• [" +
+          String(divergence.severity || "INFO").toUpperCase() +
+          "] " +
+          String(divergence.message || divergence.type)
+        )
+        .join("\n");
+      output += "\n\n";
     });
   }
 
@@ -790,6 +839,8 @@ ${result.confirmationNeeded.map((item) => `• ${item}`).join("\n")}`;
     // ADD LIFECYCLE, DECAY, COUNTER-THESIS
     // ======================================
 
+    const divergenceText = formatDivergenceReport(result.divergences);
+
     const liquidationText = formatLiquidationFlow(result.liquidationFlow);
 
     const lifecycleText = formatLifecycleUpdate(lifecycle);
@@ -820,6 +871,7 @@ Set your profile with:
 
     const finalMessage = [
       report,
+      divergenceText,
       liquidationText,
       lifecycleText,
       decayText,
