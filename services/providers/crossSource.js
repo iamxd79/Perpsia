@@ -1,9 +1,11 @@
 "use strict";
 
+
 function numeric(value) {
   const result = Number(value);
   return Number.isFinite(result) ? result : null;
 }
+
 
 function median(values) {
   const numbers = values.map(numeric).filter((value) => value !== null).sort((a, b) => a - b);
@@ -12,15 +14,18 @@ function median(values) {
   return numbers.length % 2 ? numbers[middle] : (numbers[middle - 1] + numbers[middle]) / 2;
 }
 
+
 function pctDifference(left, right) {
   if (left === null || right === null || right === 0) return null;
   return ((left - right) / right) * 100;
 }
 
+
 function sign(value) {
   const number = numeric(value);
   return number === null || number === 0 ? 0 : number > 0 ? 1 : -1;
 }
+
 
 function buildCrossSourceSignals(records = [], options = {}) {
   const usable = records.filter((record) => (
@@ -32,6 +37,7 @@ function buildCrossSourceSignals(records = [], options = {}) {
   const dex = usable.filter((record) => record.marketType === "spot" && record.metadata?.pairAddress);
   const signals = [];
   let scoreAdjustment = 0;
+
 
   const funding = cex.map((record) => record.funding).filter((value) => numeric(value) !== null).map(Number);
   if (funding.length >= 2) {
@@ -53,6 +59,7 @@ function buildCrossSourceSignals(records = [], options = {}) {
       });
     }
   }
+
 
   const oiChanges = cex
     .map((record) => numeric(record.metadata?.openInterestChangePct))
@@ -93,6 +100,7 @@ function buildCrossSourceSignals(records = [], options = {}) {
     }
   }
 
+
   const bases = cex
     .map((record) => pctDifference(record.perpPrice, record.spotPrice))
     .filter((value) => value !== null);
@@ -110,6 +118,7 @@ function buildCrossSourceSignals(records = [], options = {}) {
     });
   }
 
+
   const orderbookImbalances = cex
     .map((record) => numeric(record.orderbook?.imbalance))
     .filter((value) => value !== null);
@@ -126,6 +135,7 @@ function buildCrossSourceSignals(records = [], options = {}) {
       message: "Aggregated top-of-book depth is " + (adjustment > 0 ? "bid-heavy." : "ask-heavy."),
     });
   }
+
 
   const cexPrices = cex
     .map((record) => numeric(record.spotPrice || record.price))
@@ -147,6 +157,7 @@ function buildCrossSourceSignals(records = [], options = {}) {
     });
   }
 
+
   const acceleratingDex = dex.filter((record) => (
     numeric(record.metadata?.volumeAcceleration) !== null &&
     numeric(record.metadata.volumeAcceleration) >= 1.5
@@ -160,6 +171,26 @@ function buildCrossSourceSignals(records = [], options = {}) {
       scoreAdjust: 5,
       message: "DEX volume is accelerating relative to its 24-hour run rate.",
       providers: acceleratingDex.map((record) => record.provider),
+    });
+  }
+
+
+  const earlyTokenMomentum = dex.filter((record) => {
+    const created = numeric(record.metadata?.pairCreatedAt);
+    const acceleration = numeric(record.metadata?.volumeAcceleration);
+    if (created === null || acceleration === null || acceleration < 1.5) return false;
+    const createdMs = created > 100000000000 ? created : created * 1000;
+    return Date.now() - createdMs <= 14 * 24 * 60 * 60 * 1000;
+  });
+  if (earlyTokenMomentum.length) {
+    scoreAdjustment += 6;
+    signals.push({
+      type: "EARLY_TOKEN_MOMENTUM",
+      severity: "MEDIUM",
+      direction: "bullish",
+      scoreAdjust: 6,
+      message: "A recently created DEX pair is showing accelerating volume; early-token momentum is present.",
+      providers: earlyTokenMomentum.map((record) => record.provider),
     });
   }
 
@@ -179,6 +210,7 @@ function buildCrossSourceSignals(records = [], options = {}) {
       message: "Tracked liquidity is " + (medianLiquidityDelta > 0 ? "growing." : "declining."),
     });
   }
+
 
   const sentiment = usable.find((record) => record.provider === "alternative");
   const fearGreed = numeric(sentiment?.metadata?.fearGreedValue);
@@ -206,6 +238,7 @@ function buildCrossSourceSignals(records = [], options = {}) {
     }
   }
 
+
   const securityRisks = usable
     .map((record) => numeric(record.securityRisk))
     .filter((value) => value !== null);
@@ -222,6 +255,7 @@ function buildCrossSourceSignals(records = [], options = {}) {
       message: "A security provider reports critical token risk; no actionable setup should be issued.",
     });
   }
+
 
   const directions = priceChanges.map(sign).filter(Boolean);
   const bullish = directions.filter((value) => value > 0).length;
@@ -252,6 +286,7 @@ function buildCrossSourceSignals(records = [], options = {}) {
     });
   }
 
+
   return {
     scoreAdjustment: Math.max(-40, Math.min(40, scoreAdjustment)),
     signals,
@@ -271,6 +306,7 @@ function buildCrossSourceSignals(records = [], options = {}) {
     options,
   };
 }
+
 
 module.exports = {
   buildCrossSourceSignals,
