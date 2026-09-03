@@ -1,13 +1,18 @@
 require("dotenv").config();
 
 const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
-
 const {
   StreamableHTTPClientTransport,
 } = require("@modelcontextprotocol/sdk/client/streamableHttp.js");
 
-
-// CREATE CMC CLIENT
+const {
+  executeWithResilience,
+} = require("./resilience");
+const {
+  recordCmcError,
+  recordCmcRequest,
+  structuredLog,
+} = require("./telemetry");
 
 async function createCmcClient() {
   const endpoint = process.env.CMC_MCP_ENDPOINT;
@@ -43,77 +48,125 @@ async function createCmcClient() {
   );
 
   await client.connect(transport);
-
   return client;
 }
 
+function providerError(result) {
+  const textBlock = result?.content?.find((item) => item.type === "text");
+  const error = new Error(
+    "CMC Skill Hub error: " +
+    (textBlock?.text || "The provider returned an MCP tool error.")
+  );
+  error.code = "CMC_PROVIDER_ERROR";
+  return error;
+}
 
-// FIND SKILL
-
-async function findSkill(query, topK = 5) {
+async function callToolOnce(toolName, argumentsObject, timeout) {
   const client = await createCmcClient();
 
   try {
     const result = await client.callTool(
       {
-        name: "find_skill",
-        arguments: {
+        name: toolName,
+        arguments: argumentsObject,
+      },
+      undefined,
+      {
+        timeout,
+      }
+    );
+
+    if (result?.isError) {
+      throw providerError(result);
+    }
+
+    return result;
+  } finally {
+    await client.close();
+  }
+}
+
+function retryLogger(skill, detail) {
+  structuredLog("warn", "cmc_retry", {
+    skill,
+    attempt: detail.attempt,
+    retries: detail.retries,
+    delayMs: detail.delayMs,
+    reason: detail.error?.message || "retryable provider error",
+  });
+}
+
+async function findSkill(query, topK = 5) {
+  const skill = "find_skill";
+  const startedAt = Date.now();
+
+  try {
+    const result = await executeWithResilience(
+      () => callToolOnce(
+        "find_skill",
+        {
           query,
           top_k: topK,
         },
-      },
-      undefined,
+        180000
+      ),
       {
-        timeout: 180000,
+        onRetry: (detail) => retryLogger(skill, detail),
       }
     );
 
+    recordCmcRequest(skill, Date.now() - startedAt, "success");
     return result;
-
-  } finally {
-
-    await client.close();
-
+  } catch (error) {
+    recordCmcRequest(skill, Date.now() - startedAt, "error");
+    recordCmcError(skill, error);
+    structuredLog("error", "cmc_skill_failed", {
+      skill,
+      code: error.code || "UNKNOWN",
+      message: error.message,
+    });
+    throw error;
   }
 }
-
-
-// EXECUTE SKILL
 
 async function executeSkill(uniqueName, parameters = {}) {
-  const client = await createCmcClient();
+  const skill = String(uniqueName || "unknown");
+  const startedAt = Date.now();
+
+  structuredLog("info", "cmc_skill_started", { skill });
 
   try {
-
-    console.log(`Running CMC Skill: ${uniqueName}`);
-
-    const result = await client.callTool(
-      {
-        name: "execute_skill",
-        arguments: {
-          unique_name: uniqueName,
+    const result = await executeWithResilience(
+      () => callToolOnce(
+        "execute_skill",
+        {
+          unique_name: skill,
           parameters,
         },
-      },
-      undefined,
+        300000
+      ),
       {
-        timeout: 300000,
+        onRetry: (detail) => retryLogger(skill, detail),
       }
     );
 
-    console.log(`CMC Skill completed: ${uniqueName}`);
-
+    recordCmcRequest(skill, Date.now() - startedAt, "success");
+    structuredLog("info", "cmc_skill_completed", {
+      skill,
+      latencyMs: Date.now() - startedAt,
+    });
     return result;
-
-  } finally {
-
-    await client.close();
-
+  } catch (error) {
+    recordCmcRequest(skill, Date.now() - startedAt, "error");
+    recordCmcError(skill, error);
+    structuredLog("error", "cmc_skill_failed", {
+      skill,
+      code: error.code || "UNKNOWN",
+      message: error.message,
+    });
+    throw error;
   }
 }
-
-
-// EXPORTS
 
 module.exports = {
   createCmcClient,
