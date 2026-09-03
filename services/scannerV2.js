@@ -6,6 +6,7 @@
 const { executeSkill } = require("./cmcClient");
 const { buildCMCParams, buildPerpAnalysisParams, normalizeVenue } = require("./exchangeAdapter");
 const { analyzeDivergence } = require("./divergence");
+const { checkWhaleActivity } = require("./whaleAlerts");
 const { RequestQueue } = require("./queue");
 
 const ACTIVE_SIGNAL_SCORE = 70;
@@ -622,6 +623,7 @@ function classifyCandidate(symbol, packs) {
   const orderbookText = packs.orderbook ? getReportText(packs.orderbook) : "";
   const mtfText = packs.mtf ? getReportText(packs.mtf) : "";
   const liquidationFlow = packs.liquidation || null;
+  const whaleActivity = packs.whaleActivity || null;
 
   const allText = `
 ${accumulationText}
@@ -842,6 +844,22 @@ ${mtfText}
   );
   reasons.push(...divergences.map((divergence) => divergence.message));
 
+  if (whaleActivity?.status === "available") {
+    if (
+      whaleActivity.volumeToExchanges > whaleActivity.volumeFromExchanges &&
+      whaleActivity.volumeToExchanges > 0
+    ) {
+      score -= 10;
+      reasons.push(whaleActivity.summary);
+    } else if (
+      whaleActivity.volumeFromExchanges > whaleActivity.volumeToExchanges &&
+      whaleActivity.volumeFromExchanges > 0
+    ) {
+      score += 5;
+      reasons.push(whaleActivity.summary);
+    }
+  }
+
   score = Math.max(0, Math.min(100, score));
 
   if (!hasCoreData) {
@@ -951,6 +969,7 @@ ${mtfText}
 
     conflicts,
     liquidationFlow,
+    whaleActivity,
     divergences,
 
     price,
@@ -1077,6 +1096,14 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
       );
 
       await onProgress({
+        percent: basePercent + 9,
+        stage: "$" + symbol + " Whale Activity",
+        message: "🐋 Checking $" + symbol + " large-holder transfers...",
+      });
+
+      const whaleActivity = await checkWhaleActivity(symbol);
+
+      await onProgress({
         percent: basePercent + 10,
         stage: `$${symbol} Orderbook`,
         message: `🧱 Reading $${symbol} bid and ask pressure...`,
@@ -1113,6 +1140,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}) {
           perp,
           orderbook,
           liquidation,
+          whaleActivity,
           mtf,
         }),
         venue,
@@ -1208,6 +1236,14 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
   );
 
   await onProgress({
+    percent: 60,
+    stage: "$" + symbol + " Whale Activity",
+    message: "🐋 Checking $" + symbol + " large-holder transfers...",
+  });
+
+  const whaleActivity = await checkWhaleActivity(symbol);
+
+  await onProgress({
     percent: 65,
     stage: `$${symbol} Orderbook`,
     message: `🧱 Checking $${symbol} bid and ask pressure...`,
@@ -1244,6 +1280,7 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
       perp,
       orderbook,
       liquidation,
+      whaleActivity,
       mtf,
     }),
     venue,
