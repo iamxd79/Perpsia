@@ -186,6 +186,45 @@ function formatDivergenceReport(divergences) {
   return lines.join(String.fromCharCode(10));
 }
 
+function formatUsd(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0";
+  if (number >= 1000000000) return (number / 1000000000).toFixed(1) + "B";
+  if (number >= 1000000) return (number / 1000000).toFixed(1) + "M";
+  if (number >= 1000) return (number / 1000).toFixed(1) + "K";
+  return number.toFixed(0);
+}
+
+function formatWhaleActivity(activity) {
+  if (!activity || activity.status !== "available") return "";
+
+  const lines = [
+    "🐋 WHALE ACTIVITY",
+    activity.summary || "Large-holder transfer activity detected.",
+  ];
+
+  if (activity.volumeToExchanges > 0) {
+    lines.push("To exchanges: $" + formatUsd(activity.volumeToExchanges));
+  }
+
+  if (activity.volumeFromExchanges > 0) {
+    lines.push("From exchanges: $" + formatUsd(activity.volumeFromExchanges));
+  }
+
+  if (activity.largestMove?.valueUsd > 0) {
+    lines.push(
+      "Largest transfer: $" +
+        formatUsd(activity.largestMove.valueUsd) +
+        " (" +
+        String(activity.largestMove.transferType || "TRANSFER").replaceAll("_", " ") +
+        ")"
+    );
+  }
+
+  return lines.join(String.fromCharCode(10));
+}
+
+
 function formatScanResult(result) {
   const total =
     result.longs.length +
@@ -278,6 +317,34 @@ Assets analyzed: ${total}
         )
         .join("\n");
       output += "\n\n";
+    });
+  }
+
+
+  const whaleSignals = [
+    ...result.longs,
+    ...result.shorts,
+    ...result.watchlist,
+    ...result.neutral,
+  ].filter((signal) => signal.whaleActivity?.status === "available");
+
+  if (whaleSignals.length > 0) {
+    output += "\n🐋 WHALE ACTIVITY\n\n";
+
+    whaleSignals.slice(0, 5).forEach((signal) => {
+      const activity = signal.whaleActivity;
+      output += "$" + signal.symbol + "\n";
+      output += (activity.summary || "Large-holder transfer activity detected.") + "\n";
+
+      if (activity.volumeToExchanges > 0) {
+        output += "To exchanges: $" + formatUsd(activity.volumeToExchanges) + "\n";
+      }
+
+      if (activity.volumeFromExchanges > 0) {
+        output += "From exchanges: $" + formatUsd(activity.volumeFromExchanges) + "\n";
+      }
+
+      output += "\n";
     });
   }
 
@@ -842,6 +909,7 @@ ${result.confirmationNeeded.map((item) => `• ${item}`).join("\n")}`;
     const divergenceText = formatDivergenceReport(result.divergences);
 
     const liquidationText = formatLiquidationFlow(result.liquidationFlow);
+    const whaleText = formatWhaleActivity(result.whaleActivity);
 
     const lifecycleText = formatLifecycleUpdate(lifecycle);
     const decayText = formatSignalDecay(decay);
@@ -873,6 +941,7 @@ Set your profile with:
       report,
       divergenceText,
       liquidationText,
+      whaleText,
       lifecycleText,
       decayText,
       counterText,
