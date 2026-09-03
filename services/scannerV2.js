@@ -74,8 +74,6 @@ function parseToolResult(result) {
   return parsed;
 }
 
-function getCachedResult
-
 function getCachedResult(cacheKey) {
   const cached = resultCache.get(cacheKey);
 
@@ -265,8 +263,6 @@ function getReportText(payload) {
   return String(report || "");
 }
 
-function textIncludesAny
-
 function textIncludesAny(text, words) {
   if (!text) return false;
   return words.some((word) => text.toLowerCase().includes(word.toLowerCase()));
@@ -356,8 +352,6 @@ function extractSymbolsFromScan(scanPayload) {
 
   return [...new Set(symbols)].slice(0, MAX_SCAN_CANDIDATES);
 }
-
-function buildConfirmationNeeded
 
 function buildConfirmationNeeded({
   direction,
