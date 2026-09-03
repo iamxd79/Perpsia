@@ -84,13 +84,29 @@ const bot = new TelegramBot(
   process.env.TELEGRAM_BOT_TOKEN,
   {
     polling: {
-      autoStart: true,
+      autoStart: false,
       params: {
         timeout: 30,
       },
     },
   }
 );
+
+bot.on("polling_error", (error) => {
+  const errorCode = error?.response?.body?.error_code;
+  const errorMessage = error?.message || "";
+
+  if (errorCode === 409 || /409 Conflict/i.test(errorMessage)) {
+    console.error(
+      "Telegram polling stopped: another process is already polling this bot token."
+    );
+
+    bot.stopPolling().catch(() => {});
+    return;
+  }
+
+  console.error("Telegram polling error:", errorMessage);
+});
 
 // ==========================================
 // GLOBAL LOCKS
@@ -986,6 +1002,11 @@ Request Queue: ACTIVE
 Multi-Exchange Support: ACTIVE
 4H Autonomous Scheduler: ${schedulerStatus}`
   );
+});
+
+bot.startPolling().catch((error) => {
+  console.error("Telegram polling failed to start:", error.message);
+  process.exitCode = 1;
 });
 
 // ==========================================
