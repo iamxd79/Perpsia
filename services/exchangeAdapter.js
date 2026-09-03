@@ -49,7 +49,9 @@ function normalizeVenueKey(value) {
   return String(value || "")
     .trim()
     .toLowerCase()
-    .replace(/[\\s_-]+/g, "");
+    .replaceAll(" ", "")
+    .replaceAll("_", "")
+    .replaceAll("-", "");
 }
 
 const venueAliases = new Map();
