@@ -23,7 +23,7 @@ test("collapses multiple CEX venues into one derivatives evidence group", () => 
       { provider: "okx", status: "ok", priceChange24h: 0.8 },
     ],
   });
-  assert.deepEqual(grouped.groups, ["DERIVATIVES", "ORDERBOOK", "SPOT"]);
+  assert.deepEqual(grouped.groups, ["DERIVATIVES"]);
   assert.equal(grouped.byGroup.DERIVATIVES.providers.length, 3);
 });
 
