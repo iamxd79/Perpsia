@@ -1,15 +1,20 @@
 const OpenAI = require("openai");
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+let openai = null;
+
+function getOpenAIClient() {
+  if (!process.env.OPENAI_API_KEY) return null;
+  if (!openai) openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return openai;
+}
 
 async function buildReasoningBrief({ signal, lifecycle, decay, counter, memory }) {
-  if (!process.env.OPENAI_API_KEY) {
+  const client = getOpenAIClient();
+  if (!client) {
     return "";
   }
 
-  const response = await openai.responses.create({
+  const response = await client.responses.create({
     model: "gpt-5.5",
     input: [
       {

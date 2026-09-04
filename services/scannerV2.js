@@ -2225,7 +2225,12 @@ function classifyCandidate(symbol, packs) {
   const liquidationFlow = packs.liquidation || null;
   const whaleActivity = packs.whaleActivity || null;
   const correlation = packs.correlation || null;
-  const crossSource = packs.crossSource || buildCrossSourceSignals(Array.isArray(packs.marketEvidence) ? packs.marketEvidence : []);
+  const marketEvidence = Array.isArray(packs.marketEvidence)
+    ? packs.marketEvidence
+    : Array.isArray(packs.marketEvidence?.records)
+      ? packs.marketEvidence.records
+      : [];
+  const crossSource = packs.crossSource || buildCrossSourceSignals(marketEvidence);
   const securityBlocked = Boolean(crossSource.signals.some((signal) => signal.hardRisk));
 
 
@@ -3323,7 +3328,7 @@ ${mtfText}
     conflicts,
     evidence: { perpFlow: direction },
     hasCoreData,
-    marketEvidence: packs.marketEvidence,
+    marketEvidence,
     crossSource,
   });
 
@@ -3408,7 +3413,7 @@ ${mtfText}
     whaleActivity,
     correlation,
     divergences,
-    marketEvidence: Array.isArray(packs.marketEvidence) ? packs.marketEvidence : [],
+    marketEvidence,
     crossSource,
 
 

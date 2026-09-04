@@ -107,8 +107,19 @@ workflow.
 /analyze BTC
 /analyze $BTC
 /analyze BTC Binance
+/alpha
+/alpha TOKEN
 /risk 500 1 5
+/watchlist
+/watchlist add SOL
+/watchlist remove SOL
+/history BTC
+/compare SOL ETH
+/backtest BTC
+/performance
 /status
+/settings
+/about
 /chatid
 ```
 
@@ -129,6 +140,10 @@ Scan the market
 Find futures opportunities
 I have $500, risk 1%, max leverage 5x
 Check Perpsia status
+Show me early alpha
+Compare SOL and ETH
+Track HYPE
+How has BTC changed since the last scan?
 ```
 
 
@@ -625,6 +640,14 @@ PERFORMANCE_CORS_ORIGIN=
 ONCHAIN_RPC_URLS=
 ONCHAIN_ASSET_REGISTRY=
 ONCHAIN_EXCHANGE_ADDRESSES=
+BINANCE_REF_CODE=
+BINANCE_REF_URL=
+HYPERLIQUID_REF_CODE=
+HYPERLIQUID_REF_URL=
+BYBIT_REF_CODE=
+BYBIT_REF_URL=
+OKX_REF_CODE=
+OKX_REF_URL=
 ```
 
 
@@ -637,6 +660,30 @@ worker implementation.
 
 
 Never commit environment files or secrets.
+
+### Trading-link configuration
+
+Trade buttons are generated only when normalized provider evidence confirms that
+the exact perpetual market exists. Binance, Bybit, OKX, and Hyperliquid are
+supported. Empty referral variables keep normal direct market links active.
+
+For the current Binance referral configuration, set these server-side values on
+Render:
+
+```text
+BINANCE_REF_CODE=KPY12BIU
+BINANCE_REF_URL=https://www.binance.com/register?ref=KPY12BIU
+HYPERLIQUID_REF_CODE=
+HYPERLIQUID_REF_URL=
+BYBIT_REF_CODE=
+BYBIT_REF_URL=
+OKX_REF_CODE=
+OKX_REF_URL=
+```
+
+PerpsIA never appends referral parameters to unsupported trading URLs. When a
+validated venue-specific referral URL is unavailable, Binance uses the validated
+registration fallback and the other venues use their normal direct market URL.
 
 
 

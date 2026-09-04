@@ -49,6 +49,21 @@ db.exec(`
     max_leverage REAL,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS user_watchlist (
+    chat_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chat_id, symbol)
+  );
+
+  CREATE TABLE IF NOT EXISTS user_preferences (
+    chat_id TEXT PRIMARY KEY,
+    preferred_exchange TEXT NOT NULL DEFAULT 'Binance',
+    alert_frequency TEXT NOT NULL DEFAULT '4h',
+    signal_sensitivity TEXT NOT NULL DEFAULT 'balanced',
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 
@@ -275,6 +290,104 @@ function getRiskSettings(chatId) {
 
 
 // ==========================================
+// WATCHLIST AND USER PREFERENCES
+// ==========================================
+
+
+function normalizeTrackedSymbol(symbol) {
+  return String(symbol || "")
+    .trim()
+    .replace(/^\$/, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+
+function getWatchlist(chatId) {
+  return db
+    .prepare(`
+      SELECT symbol, created_at
+      FROM user_watchlist
+      WHERE chat_id = ?
+      ORDER BY created_at ASC, symbol ASC
+    `)
+    .all(String(chatId));
+}
+
+
+function addToWatchlist(chatId, symbol) {
+  const normalized = normalizeTrackedSymbol(symbol);
+  if (!normalized) throw new Error("A valid asset symbol is required.");
+  return db
+    .prepare(`
+      INSERT OR IGNORE INTO user_watchlist (chat_id, symbol)
+      VALUES (?, ?)
+    `)
+    .run(String(chatId), normalized);
+}
+
+
+function removeFromWatchlist(chatId, symbol) {
+  const normalized = normalizeTrackedSymbol(symbol);
+  if (!normalized) throw new Error("A valid asset symbol is required.");
+  return db
+    .prepare(`
+      DELETE FROM user_watchlist
+      WHERE chat_id = ? AND symbol = ?
+    `)
+    .run(String(chatId), normalized);
+}
+
+
+function getUserPreferences(chatId) {
+  return db
+    .prepare(`
+      SELECT chat_id, preferred_exchange, alert_frequency, signal_sensitivity, updated_at
+      FROM user_preferences
+      WHERE chat_id = ?
+    `)
+    .get(String(chatId)) || {
+      chat_id: String(chatId),
+      preferred_exchange: "Binance",
+      alert_frequency: "4h",
+      signal_sensitivity: "balanced",
+      updated_at: null,
+    };
+}
+
+
+function saveUserPreferences(chatId, updates = {}) {
+  const current = getUserPreferences(chatId);
+  const preferredExchange = String(updates.preferred_exchange || updates.preferredExchange || current.preferred_exchange || "Binance");
+  const alertFrequency = String(updates.alert_frequency || updates.alertFrequency || current.alert_frequency || "4h");
+  const signalSensitivity = String(updates.signal_sensitivity || updates.signalSensitivity || current.signal_sensitivity || "balanced");
+
+  db.prepare(`
+    INSERT INTO user_preferences (
+      chat_id,
+      preferred_exchange,
+      alert_frequency,
+      signal_sensitivity,
+      updated_at
+    ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(chat_id)
+    DO UPDATE SET
+      preferred_exchange = excluded.preferred_exchange,
+      alert_frequency = excluded.alert_frequency,
+      signal_sensitivity = excluded.signal_sensitivity,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    String(chatId),
+    preferredExchange,
+    alertFrequency,
+    signalSensitivity
+  );
+
+  return getUserPreferences(chatId);
+}
+
+
+// ==========================================
 // STATS
 // ==========================================
 
@@ -312,6 +425,11 @@ module.exports = {
   getLastAlert,
   saveRiskSettings,
   getRiskSettings,
+  getWatchlist,
+  addToWatchlist,
+  removeFromWatchlist,
+  getUserPreferences,
+  saveUserPreferences,
   getMemoryStats,
   getStorageInfo,
 };

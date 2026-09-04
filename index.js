@@ -140,6 +140,12 @@ const {
   compareAssetState,
   saveRiskSettings,
   getRiskSettings,
+  getAssetHistory,
+  getWatchlist,
+  addToWatchlist,
+  removeFromWatchlist,
+  getUserPreferences,
+  saveUserPreferences,
 } = require("./services/memory");
 
 
@@ -297,6 +303,32 @@ const {
   getProviderCatalog,
   getProviderHealth,
 } = require("./services/providers/publicProviders");
+const {
+  ABOUT_MESSAGE,
+  HELP_MESSAGE,
+  WELCOME_MESSAGE,
+  formatAlphaCard,
+  formatComparison,
+  formatErrorState,
+  formatHistory,
+  formatPerformance,
+  formatProgress,
+  formatRiskProfile,
+  formatScanSummary,
+  formatSettings,
+  formatSignalCard,
+  formatStatus,
+  formatWatchlist,
+  registerPublicCommands,
+  scanSummaryKeyboard,
+  settingsKeyboard,
+  signalKeyboard,
+  startKeyboard,
+  watchlistKeyboard,
+} = require("./services/telegramUi");
+const {
+  buildTradingLinksForSignal,
+} = require("./services/tradingLinks");
 
 
 
@@ -681,6 +713,7 @@ const bot = new TelegramBot(
 let pollingRetryTimer = null;
 let pollingRetryAttempt = 0;
 let pollingRestarting = false;
+let commandsRegistered = false;
 
 
 
@@ -719,6 +752,15 @@ async function startTelegramPolling() {
 
 
   try {
+    if (!commandsRegistered) {
+      try {
+        await registerPublicCommands(bot);
+        commandsRegistered = true;
+        console.log("Telegram command menu registered.");
+      } catch (error) {
+        console.error("Telegram command registration failed:", error?.message || error);
+      }
+    }
     await bot.startPolling();
     pollingRetryAttempt = 0;
     console.log("Telegram polling started.");
@@ -784,6 +826,7 @@ bot.on("polling_error", (error) => {
 
 
 let isAnalyzeRunning = false;
+const latestScansByChat = new Map();
 
 
 
@@ -875,11 +918,12 @@ function progressBar(percent) {
 
 
 
-async function safeEditMessage(chatId, messageId, text) {
+async function safeEditMessage(chatId, messageId, text, options = {}) {
   try {
     await bot.editMessageText(text, {
       chat_id: chatId,
       message_id: messageId,
+      ...options,
     });
   } catch {}
 }
@@ -2152,43 +2196,7 @@ function formatBacktestResult(result) {
 
 
 function getHelpMessage() {
-  return `⚙️ PERPSIA COMMANDS
-
-🔎 /scan [venue]
-Scan the perpetual futures market with live CMC data. The candidate scan is global; deep analysis uses the selected venue.
-
-🧠 /analyze BTC [venue]
-Run deep analysis on any supported futures asset.
-
-Examples:
-/analyze BTC
-/analyze BLUR OKX
-/analyze SOL Bybit
-
-Supported venues: Binance, Bybit, OKX, Dydx, Hyperliquid
-
-🛡️ /risk 500 1 5
-Set your risk profile.
-
-Capital: $500
-Risk: 1%
-Max leverage: 5x
-
-🟢 /status
-Check agent status.
-
-🆔 /chatid
-Get your Telegram chat ID.
-
-📊 /backtest BTC [days]
-Run historical paper trading (default: 90 days).
-
-You can also talk naturally:
-
-"Analyze BTC"
-"Scan the market"
-"I have $500, risk 1%, max leverage 5x"
-"Check Perpsia status"`;
+  return HELP_MESSAGE;
 }
 
 
@@ -2206,45 +2214,12 @@ You can also talk naturally:
 
 
 
-bot.onText(/\/start/, async (msg) => {
+bot.onText(/^\/start(?:@\w+)?$/i, async (msg) => {
   await bot.sendMessage(
     msg.chat.id,
-    `⚡ WELCOME TO PERPSIA
-
-Your autonomous perpetual futures market intelligence agent.
-
-Perpsia scans the market with LIVE CoinMarketCap Skill Hub data, analyzes opportunities, tracks how setups evolve, and alerts you when meaningful changes are detected.
-
-Powered by <a href="https://coinmarketcap.com/api/skills-marketplace/">CoinMarketCap Skill Hub</a>, multi-exchange support, and AI reasoning.
-
-You can talk naturally.
-
-Try:
-
-<code>Analyze BTC</code>
-
-<code>Scan the market</code>
-
-<code>I have $500, risk 1%, max leverage 5x</code>
-
-What would you like to do?`,
+    WELCOME_MESSAGE,
     {
-      parse_mode: "HTML",
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "🔎 Scan Market", callback_data: "scan_market" },
-            { text: "🧠 Analyze Asset", callback_data: "analyze_asset" },
-          ],
-          [
-            { text: "🛡️ Set Risk", callback_data: "set_risk" },
-            { text: "⚙️ Commands", callback_data: "show_commands" },
-          ],
-          [
-            { text: "🌐 Learn More", url: "https://perpsia.vercel.app/" },
-          ],
-        ],
-      },
+      reply_markup: startKeyboard(),
     }
   );
 });
@@ -2283,11 +2258,191 @@ What would you like to do?`,
 
 
 
-bot.onText(/\/help/, async (msg) => {
+bot.onText(/^\/help(?:@\w+)?$/i, async (msg) => {
   await bot.sendMessage(msg.chat.id, getHelpMessage());
 });
 
 
+function preferredVenue(chatId, fallback = "Binance") {
+  const requested = getUserPreferences(chatId)?.preferred_exchange || fallback;
+  try {
+    return normalizeVenue(requested);
+  } catch {
+    return fallback;
+  }
+}
+
+
+function allScanSignals(result = {}) {
+  return [
+    ...(result.longs || []),
+    ...(result.shorts || []),
+    ...(result.watchlist || []),
+    ...(result.neutral || []),
+  ];
+}
+
+
+function attachSignalLifecycle(signal) {
+  const previous = getLastAssetState(signal.symbol);
+  const lifecycle = getLifecycleStage(signal, previous);
+  signal.lifecycleStage = lifecycle.stage;
+  return { previous, lifecycle };
+}
+
+
+function storeSignal(signal, source) {
+  saveAssetState(signal);
+  recordTelemetrySignal(signal);
+  recordPerformanceSignal(signal, source);
+}
+
+
+function signalReplyMarkup(signal, options = {}) {
+  return signalKeyboard(
+    signal,
+    buildTradingLinksForSignal(signal),
+    options
+  );
+}
+
+
+async function showRiskProfile(chatId) {
+  return bot.sendMessage(chatId, formatRiskProfile(getRiskSettings(chatId)));
+}
+
+
+async function updateRiskProfile(chatId, capital, riskPercent, maxLeverage) {
+  const values = [capital, riskPercent, maxLeverage].map(Number);
+  if (values.some((value) => !Number.isFinite(value) || value <= 0)) {
+    return bot.sendMessage(chatId, "RISK PROFILE\n\nUse /risk 500 1 5\n\nCapital $500 · Risk 1% · Max leverage 5x");
+  }
+  saveRiskSettings(chatId, values[0], values[1], values[2]);
+  return showRiskProfile(chatId);
+}
+
+
+async function showWatchlist(chatId, messageId = null) {
+  const entries = getWatchlist(chatId);
+  const text = formatWatchlist(entries);
+  const options = { reply_markup: watchlistKeyboard(entries, preferredVenue(chatId)) };
+  if (messageId) return safeEditMessage(chatId, messageId, text, options);
+  return bot.sendMessage(chatId, text, options);
+}
+
+
+async function changeWatchlist(chatId, action, symbol, messageId = null) {
+  if (action === "add") addToWatchlist(chatId, symbol);
+  else removeFromWatchlist(chatId, symbol);
+  return showWatchlist(chatId, messageId);
+}
+
+
+async function showSettings(chatId, messageId = null) {
+  const preferences = getUserPreferences(chatId);
+  const entries = getWatchlist(chatId);
+  const text = formatSettings(preferences, entries.length, getRiskSettings(chatId));
+  const options = { reply_markup: settingsKeyboard() };
+  if (messageId) return safeEditMessage(chatId, messageId, text, options);
+  return bot.sendMessage(chatId, text, options);
+}
+
+
+async function runHistory(chatId, symbol) {
+  const asset = String(symbol || "").replace(/^\$/, "").toUpperCase();
+  if (!asset) return bot.sendMessage(chatId, "Use /history BTC");
+  return bot.sendMessage(chatId, formatHistory(asset, getAssetHistory(asset, 8)));
+}
+
+
+async function runPerformanceReport(chatId) {
+  try {
+    return bot.sendMessage(chatId, formatPerformance(getSignalQualityReport({ horizon: "24h" })));
+  } catch (error) {
+    console.error("Performance report failed:", error);
+    return bot.sendMessage(chatId, formatErrorState("Performance unavailable", error));
+  }
+}
+
+
+async function showUserStatus(chatId) {
+  const providerHealth = getProviderHealth();
+  const providersOnline = !providerHealth.some((item) =>
+    ["circuit_open", "offline"].includes(String(item?.status || "").toLowerCase())
+  );
+  return bot.sendMessage(chatId, formatStatus({
+    providersOnline,
+    databasePersistent: Boolean(getStorageInfo().persistent),
+    schedulerOnline: Boolean(autonomousChatId),
+  }));
+}
+
+
+function renderScanProgress(progress, tracker, options = {}) {
+  const candidateMatch = String(progress?.message || "").match(/(\d+)\s+candidates?/i);
+  if (candidateMatch) tracker.total = Number(candidateMatch[1]);
+  const symbolMatch = String(progress?.stage || "").match(/^\$([A-Z0-9]+)/i);
+  if (symbolMatch) tracker.seen.add(symbolMatch[1].toUpperCase());
+  return formatProgress({
+    kind: options.kind || "scan",
+    symbol: options.symbol,
+    venue: options.venue,
+    percent: progress?.percent,
+    stage: progress?.stage,
+    current: tracker.seen.size,
+    total: tracker.total,
+  });
+}
+
+
+async function runComparison(chatId, leftSymbol, rightSymbol, venue = "Binance") {
+  const left = String(leftSymbol || "").replace(/^\$/, "").toUpperCase();
+  const right = String(rightSymbol || "").replace(/^\$/, "").toUpperCase();
+  if (!left || !right) return bot.sendMessage(chatId, "Use /compare SOL ETH");
+  venue = normalizeVenue(venue || preferredVenue(chatId));
+  const loading = await bot.sendMessage(chatId, formatProgress({ kind: "analysis", symbol: left + " vs " + right, venue, percent: 5 }));
+
+  try {
+    const results = [];
+    for (let index = 0; index < 2; index++) {
+      const symbol = index === 0 ? left : right;
+      const result = await analyzeAsset(symbol, venue, async (progress) => {
+        const scaled = index === 0
+          ? 5 + Math.round((Number(progress.percent) || 0) * 0.43)
+          : 52 + Math.round((Number(progress.percent) || 0) * 0.43);
+        await safeEditMessage(chatId, loading.message_id, formatProgress({ kind: "analysis", symbol: left + " vs " + right, venue, percent: scaled, stage: progress.stage }));
+      });
+      const { lifecycle } = attachSignalLifecycle(result);
+      result.lifecycleStage = lifecycle.stage;
+      storeSignal(result, "comparison");
+      results.push(result);
+    }
+    recordScan("comparison", "success");
+    return safeEditMessage(chatId, loading.message_id, formatComparison(results[0], results[1]));
+  } catch (error) {
+    console.error("Comparison failed:", error);
+    recordScan("comparison", "error");
+    return safeEditMessage(chatId, loading.message_id, formatErrorState("Comparison unavailable", error));
+  }
+}
+
+
+async function showScanBucket(chatId, messageId, bucket) {
+  const latest = latestScansByChat.get(String(chatId));
+  if (!latest) return bot.sendMessage(chatId, "No recent scan is available. Use /scan first.");
+  const signals = bucket === "watchlist"
+    ? latest.result.watchlist || []
+    : [...(latest.result.longs || []), ...(latest.result.shorts || [])].sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+  if (!signals.length) {
+    return safeEditMessage(chatId, messageId, bucket === "watchlist" ? "WATCHLIST\n\nNo watchlist setups met the current rules." : "TOP SETUPS\n\nNo actionable setups met the current rules.", { reply_markup: scanSummaryKeyboard(latest.venue) });
+  }
+  const selected = signals.slice(0, 3);
+  const text = [bucket === "watchlist" ? "CURRENT WATCHLIST" : "TOP SETUPS", "", ...selected.map((signal) => formatSignalCard(signal))].join("\n\n");
+  const rows = [];
+  for (const signal of selected) rows.push(...signalReplyMarkup(signal, { venue: latest.venue }).inline_keyboard);
+  rows.push([{ text: "Back to Summary", callback_data: "scan_view:summary" }]);
+  return safeEditMessage(chatId, messageId, text, { reply_markup: { inline_keyboard: rows } });
+}
 
 
 
@@ -2302,7 +2457,9 @@ bot.onText(/\/help/, async (msg) => {
 
 
 
-bot.onText(/\/backtest(?:\s+([A-Za-z0-9$_-]+))?(?:\s+([0-9]+))?/, async (msg, match) => {
+
+
+bot.onText(/^\/backtest(?:@\w+)?(?:\s+([A-Za-z0-9$_-]+))?(?:\s+([0-9]+))?$/i, async (msg, match) => {
   const chatId = msg.chat.id;
   const symbol = match[1] || "BTC";
   const requestedDays = Number(match[2] || 90);
@@ -2437,9 +2594,11 @@ bot.onText(/\/backtest(?:\s+([A-Za-z0-9$_-]+))?(?:\s+([0-9]+))?/, async (msg, ma
 
 
 bot.onText(
-  /\/risk\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)/,
+  /^\/risk(?:@\w+)?(?:\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+))?$/i,
   async (msg, match) => {
     const chatId = msg.chat.id;
+
+    if (!match[1]) return showRiskProfile(chatId);
 
 
 
@@ -2534,16 +2693,7 @@ Maximum leverage: 5x`
 
 
 
-    await bot.sendMessage(
-      chatId,
-      `🛡️ RISK PROFILE UPDATED
-
-Capital: $${capital}
-Risk per trade: ${riskPercent}%
-Maximum leverage: ${maxLeverage}x
-
-Perpsia will apply this profile when an actionable LONG or SHORT setup is detected.`
-    );
+    return showRiskProfile(chatId);
   }
 );
 
@@ -2602,11 +2752,7 @@ async function runManualScan(chatId, venue = "Binance") {
   if (!lockScan()) {
     return bot.sendMessage(
       chatId,
-      `⏳ PERPSIA SCAN IN PROGRESS
-
-Another CMC Skill Hub scan is already running.
-
-Please wait for the current scan to finish.`
+      "PERPSIA SCAN IN PROGRESS\n\nAnother market scan is already running. Please wait for it to finish."
     );
   }
 
@@ -2627,12 +2773,10 @@ Please wait for the current scan to finish.`
 
   const loading = await bot.sendMessage(
     chatId,
-    `🟢 PERPSIA LIVE SCAN — ${venue}
-
-${progressBar(5)} 5%
-
-Booting market intelligence engine...`
+    formatProgress({ kind: "scan", venue, percent: 5 })
   );
+
+  const progressTracker = { seen: new Set(), total: null };
 
 
 
@@ -2654,14 +2798,7 @@ Booting market intelligence engine...`
       await safeEditMessage(
         chatId,
         loading.message_id,
-        `🟢 PERPSIA LIVE SCAN — ${venue}
-
-${progressBar(progress.percent)} ${progress.percent}%
-
-${progress.message}
-
-Current stage:
-${progress.stage}`
+        renderScanProgress(progress, progressTracker, { kind: "scan", venue })
       );
     });
 
@@ -2680,28 +2817,17 @@ ${progress.stage}`
 
 
 
-    for (const signal of [
-      ...result.longs,
-      ...result.shorts,
-      ...result.watchlist,
-      ...result.neutral,
-    ]) {
-      const previous = getLastAssetState(signal.symbol);
-      const lifecycle = getLifecycleStage(signal, previous);
-      signal.lifecycleStage = lifecycle.stage;
-      saveAssetState(signal);
-      recordTelemetrySignal(signal);
-      recordPerformanceSignal(signal, "manual_scan");
+    for (const signal of allScanSignals(result)) {
+      attachSignalLifecycle(signal);
+      storeSignal(signal, "manual_scan");
     }
     recordScan("manual", "success");
+    latestScansByChat.set(String(chatId), { result, venue, mode: "scan" });
     await safeEditMessage(
       chatId,
       loading.message_id,
-      `✅ PERPSIA SCAN COMPLETE — ${venue}
-
-${progressBar(100)} 100%
-
-Preparing market intelligence report...`
+      formatScanSummary(result, { venue }),
+      { reply_markup: scanSummaryKeyboard(venue) }
     );
 
 
@@ -2719,7 +2845,6 @@ Preparing market intelligence report...`
 
 
 
-    await bot.sendMessage(chatId, formatScanResult(result));
   } catch (error) {
     console.error("Manual market scan failed:", error);
     recordScan("manual", "error");
@@ -2742,12 +2867,63 @@ Preparing market intelligence report...`
     await safeEditMessage(
       chatId,
       loading.message_id,
-      `❌ PERPSIA SCAN FAILED
-
-Reason:
-
-${error.message}${/CMC_(?:MCP_ENDPOINT|API_KEY)/i.test(error.message) ? "\n\nMake sure CMC_MCP_ENDPOINT and CMC_API_KEY are configured." : ""}`
+      formatErrorState("PerpsIA scan unavailable", error)
     );
+  } finally {
+    unlockScan();
+  }
+}
+
+
+async function runAlphaScan(chatId) {
+  const venue = preferredVenue(chatId, "Binance");
+  if (!lockScan()) {
+    return bot.sendMessage(chatId, "PERPSIA SCAN IN PROGRESS\n\nAnother market scan is already running. Please wait for it to finish.");
+  }
+
+  const loading = await bot.sendMessage(chatId, formatProgress({ kind: "alpha", venue, percent: 5 }));
+  const progressTracker = { seen: new Set(), total: null };
+  try {
+    const result = await runMarketScan(venue, async (progress) => {
+      await safeEditMessage(chatId, loading.message_id, renderScanProgress(progress, progressTracker, { kind: "alpha", venue }));
+    }, {
+      isNewToken: true,
+      cexAvailable: true,
+    });
+
+    for (const signal of allScanSignals(result)) {
+      attachSignalLifecycle(signal);
+      storeSignal(signal, "alpha_scan");
+    }
+    recordScan("alpha", "success");
+
+    const alphaCandidates = allScanSignals(result)
+      .filter((signal) => (signal.marketEvidence || []).some((record) =>
+        ["dexscreener", "geckoterminal"].includes(String(record?.provider || "").toLowerCase()) && record.status === "ok"
+      ))
+      .sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+
+    latestScansByChat.set(String(chatId), { result, venue, mode: "alpha", alphaCandidates });
+    if (!alphaCandidates.length) {
+      return safeEditMessage(chatId, loading.message_id, "ALPHA SCAN COMPLETE\n\nNo early-momentum candidates had enough verified DEX data.", {
+        reply_markup: { inline_keyboard: [[{ text: "Run Again", callback_data: "alpha_again" }]] },
+      });
+    }
+
+    const selected = alphaCandidates.slice(0, 3);
+    const rows = [];
+    for (const signal of selected) rows.push(...signalReplyMarkup(signal, { venue, alpha: true }).inline_keyboard);
+    rows.push([{ text: "Run Again", callback_data: "alpha_again" }]);
+    return safeEditMessage(
+      chatId,
+      loading.message_id,
+      ["ALPHA SCAN COMPLETE", "", ...selected.map((signal) => formatAlphaCard(signal))].join("\n\n"),
+      { reply_markup: { inline_keyboard: rows } }
+    );
+  } catch (error) {
+    console.error("Alpha scan failed:", error);
+    recordScan("alpha", "error");
+    return safeEditMessage(chatId, loading.message_id, formatErrorState("Early alpha unavailable", error));
   } finally {
     unlockScan();
   }
@@ -2787,8 +2963,8 @@ ${error.message}${/CMC_(?:MCP_ENDPOINT|API_KEY)/i.test(error.message) ? "\n\nMak
 
 
 
-bot.onText(/\/scan(?:\s+([A-Za-z]+))?/, async (msg, match) => {
-  const venue = match[1] || "Binance";
+bot.onText(/^\/scan(?:@\w+)?(?:\s+([A-Za-z]+))?$/i, async (msg, match) => {
+  const venue = match[1] || preferredVenue(msg.chat.id);
 
 
 
@@ -2910,7 +3086,8 @@ Supported: ${listSupportedExchanges()
 async function runAssetAnalysis(
   chatId,
   symbol,
-  venue = "Binance"
+  venue = "Binance",
+  options = {}
 ) {
   symbol = String(symbol || "")
     .trim()
@@ -3059,12 +3236,15 @@ Please wait for it to finish.`
 
   const loading = await bot.sendMessage(
     chatId,
-    `🔎 PERPSIA ASSET ANALYSIS — $${symbol} on ${venue}
-
-${progressBar(5)} 5%
-
-Starting deep market analysis...`
+    formatProgress({
+      kind: options.mode === "alpha" ? "alpha" : "analysis",
+      symbol,
+      venue,
+      percent: 5,
+    })
   );
+
+  const progressTracker = { seen: new Set(), total: 1 };
 
 
 
@@ -3144,16 +3324,14 @@ Starting deep market analysis...`
         await safeEditMessage(
           chatId,
           loading.message_id,
-          `🔎 PERPSIA ASSET ANALYSIS — $${symbol} on ${venue}
-
-${progressBar(progress.percent)} ${progress.percent}%
-
-${progress.message}
-
-Current stage:
-${progress.stage}`
+          renderScanProgress(progress, progressTracker, {
+            kind: options.mode === "alpha" ? "alpha" : "analysis",
+            symbol,
+            venue,
+          })
         );
-      }
+      },
+      options.scanOptions || {}
     );
 
 
@@ -3743,19 +3921,14 @@ Set your profile with:
 
 
 
-    const finalMessage = [
-      report,
-      divergenceText,
-      liquidationText,
-      whaleText,
-      correlationText,
-      lifecycleText,
-      decayText,
-      counterText,
-      riskText,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    const finalMessage = options.mode === "alpha"
+      ? formatAlphaCard(result, { lifecycle })
+      : formatSignalCard(result, {
+          lifecycle,
+          counter: counterThesis,
+          memory: memoryChange,
+          riskPlan,
+        });
 
 
 
@@ -3794,11 +3967,8 @@ Set your profile with:
     await safeEditMessage(
       chatId,
       loading.message_id,
-      `✅ $${symbol} ANALYSIS COMPLETE
-
-${progressBar(100)} 100%
-
-Perpsia intelligence report ready.`
+      finalMessage,
+      { reply_markup: signalReplyMarkup(result, { venue, alpha: options.mode === "alpha" }) }
     );
 
 
@@ -3816,10 +3986,6 @@ Perpsia intelligence report ready.`
 
 
 
-    await bot.sendMessage(
-      chatId,
-      finalMessage
-    );
   } catch (error) {
     console.error(
       `Analysis failed for ${symbol}:`,
@@ -3845,11 +4011,7 @@ Perpsia intelligence report ready.`
     await safeEditMessage(
       chatId,
       loading.message_id,
-      `❌ $${symbol} ANALYSIS FAILED
-
-Reason:
-
-${error.message}`
+      formatErrorState(symbol + " analysis unavailable", error)
     );
   } finally {
     isAnalyzeRunning = false;
@@ -3891,9 +4053,13 @@ ${error.message}`
 
 
 bot.onText(
-  /\/analyze\s+\$?([A-Za-z0-9]+)(?:\s+([A-Za-z]+))?/,
+  /^\/analyze(?:@\w+)?(?:\s+\$?([A-Za-z0-9]+)(?:\s+([A-Za-z]+))?)?$/i,
   async (msg, match) => {
     const chatId = msg.chat.id;
+
+    if (!match[1]) {
+      return bot.sendMessage(chatId, "ANALYZE TOKEN\n\nUse /analyze BTC\n\nOptional venue: /analyze SOL Bybit");
+    }
 
 
 
@@ -3929,7 +4095,7 @@ bot.onText(
 
 
     const venue =
-      match[2] || "Binance";
+      match[2] || preferredVenue(chatId);
 
 
 
@@ -3953,6 +4119,46 @@ bot.onText(
     );
   }
 );
+
+
+bot.onText(/^\/alpha(?:@\w+)?(?:\s+\$?([A-Za-z0-9]+))?$/i, async (msg, match) => {
+  if (!match[1]) return runAlphaScan(msg.chat.id);
+  return runAssetAnalysis(msg.chat.id, match[1], preferredVenue(msg.chat.id), {
+    mode: "alpha",
+    scanOptions: { isNewToken: true, cexAvailable: true },
+  });
+});
+
+
+bot.onText(/^\/watchlist(?:@\w+)?(?:\s+(add|remove)\s+\$?([A-Za-z0-9]+))?$/i, async (msg, match) => {
+  if (!match[1]) return showWatchlist(msg.chat.id);
+  return changeWatchlist(msg.chat.id, match[1].toLowerCase(), match[2]);
+});
+
+
+bot.onText(/^\/history(?:@\w+)?(?:\s+\$?([A-Za-z0-9]+))?$/i, async (msg, match) => {
+  return runHistory(msg.chat.id, match[1]);
+});
+
+
+bot.onText(/^\/compare(?:@\w+)?(?:\s+\$?([A-Za-z0-9]+)\s+\$?([A-Za-z0-9]+))?$/i, async (msg, match) => {
+  return runComparison(msg.chat.id, match[1], match[2], preferredVenue(msg.chat.id));
+});
+
+
+bot.onText(/^\/performance(?:@\w+)?$/i, async (msg) => {
+  return runPerformanceReport(msg.chat.id);
+});
+
+
+bot.onText(/^\/settings(?:@\w+)?$/i, async (msg) => {
+  return showSettings(msg.chat.id);
+});
+
+
+bot.onText(/^\/about(?:@\w+)?$/i, async (msg) => {
+  return bot.sendMessage(msg.chat.id, ABOUT_MESSAGE);
+});
 
 
 
@@ -4087,7 +4293,7 @@ bot.on("message", async (msg) => {
 
 
     if (!DIRECT_TEXT_WORDS.has(symbol)) {
-      return runAssetAnalysis(chatId, symbol, "Binance");
+      return runAssetAnalysis(chatId, symbol, preferredVenue(chatId));
     }
   }
 
@@ -4279,7 +4485,7 @@ Check Perpsia status`
       return runAssetAnalysis(
         chatId,
         String(route.symbol).replace(/^\$/, "").toUpperCase(),
-        route.venue || "Binance"
+        route.venue || preferredVenue(chatId)
       );
     }
 
@@ -4299,8 +4505,29 @@ Check Perpsia status`
 
 
     if (route.intent === "scan_market") {
-      return runManualScan(chatId, "Binance");
+      return runManualScan(chatId, route.venue || preferredVenue(chatId));
     }
+
+    if (route.intent === "alpha") {
+      if (route.symbol) {
+        return runAssetAnalysis(chatId, route.symbol, preferredVenue(chatId), {
+          mode: "alpha",
+          scanOptions: { isNewToken: true, cexAvailable: true },
+        });
+      }
+      return runAlphaScan(chatId);
+    }
+
+    if (route.intent === "compare_assets") {
+      return runComparison(chatId, route.symbols?.[0], route.symbols?.[1], preferredVenue(chatId));
+    }
+
+    if (route.intent === "watchlist_add") return changeWatchlist(chatId, "add", route.symbol);
+    if (route.intent === "watchlist") return showWatchlist(chatId);
+    if (route.intent === "history") return runHistory(chatId, route.symbol);
+    if (route.intent === "performance") return runPerformanceReport(chatId);
+    if (route.intent === "settings") return showSettings(chatId);
+    if (route.intent === "about") return bot.sendMessage(chatId, ABOUT_MESSAGE);
 
 
 
@@ -4320,7 +4547,8 @@ Check Perpsia status`
     if (route.intent === "set_risk") {
       const capital = Number(route.capital);
       const riskPercent = Number(route.riskPercent);
-      const maxLeverage = Number(route.maxLeverage);
+      const savedRisk = getRiskSettings(chatId);
+      const maxLeverage = Number(route.maxLeverage ?? savedRisk?.max_leverage);
 
 
 
@@ -4347,7 +4575,7 @@ Check Perpsia status`
       ) {
         return bot.sendMessage(
           chatId,
-          `I need all 3 values.
+          `I understood the risk request, but I need all 3 values.
 
 Example:
 I have $500, risk 1%, max leverage 5x`
@@ -4386,14 +4614,7 @@ I have $500, risk 1%, max leverage 5x`
 
 
 
-      return bot.sendMessage(
-        chatId,
-        `🛡️ Risk profile updated.
-
-Capital: $${capital}
-Risk per trade: ${riskPercent}%
-Max leverage: ${maxLeverage}x`
-      );
+      return showRiskProfile(chatId);
     }
 
 
@@ -4412,22 +4633,7 @@ Max leverage: ${maxLeverage}x`
 
 
     if (route.intent === "status") {
-      return bot.sendMessage(
-        chatId,
-        `🟢 Perpsia is online.
-
-CMC Skill Hub: Connected
-Memory: Active
-Lifecycle: Active
-Smart Alerts: Active
-Multi-Exchange: Active
-Request Queue: Active
-Public On-chain Whales: ${process.env.ONCHAIN_ASSET_REGISTRY ? "CONFIGURED" : "DEFAULT ASSETS"}
-Correlation Analysis: Active
-Paper Performance: Active
-Resilience: Active
-Prometheus Metrics: /metrics`
-      );
+      return showUserStatus(chatId);
     }
 
 
@@ -4530,8 +4736,9 @@ Please try again or use /help.`
 
 
 bot.on("callback_query", async (query) => {
-  const chatId = query.message.chat.id;
-  const action = query.data;
+  const chatId = query.message?.chat?.id;
+  const messageId = query.message?.message_id;
+  const action = String(query.data || "");
 
 
 
@@ -4565,9 +4772,81 @@ bot.on("callback_query", async (query) => {
 
 
 
-  if (action === "scan_market") {
-    return runManualScan(chatId, "Binance");
-  }
+  if (!chatId) return;
+
+  try {
+    if (action === "scan_market") {
+      return runManualScan(chatId, preferredVenue(chatId));
+    }
+
+    if (action === "early_alpha" || action === "alpha_again") {
+      return runAlphaScan(chatId);
+    }
+
+    if (action === "show_watchlist") {
+      return showWatchlist(chatId, messageId);
+    }
+
+    if (action === "show_settings") {
+      return showSettings(chatId, messageId);
+    }
+
+    if (action === "scan_view:top") {
+      return showScanBucket(chatId, messageId, "top");
+    }
+
+    if (action === "scan_view:watchlist") {
+      return showScanBucket(chatId, messageId, "watchlist");
+    }
+
+    if (action === "scan_view:summary") {
+      const latest = latestScansByChat.get(String(chatId));
+      if (!latest) return bot.sendMessage(chatId, "No recent scan is available. Use /scan first.");
+      return safeEditMessage(
+        chatId,
+        messageId,
+        formatScanSummary(latest.result, { venue: latest.venue }),
+        { reply_markup: scanSummaryKeyboard(latest.venue) }
+      );
+    }
+
+    if (action.startsWith("scan_again:")) {
+      return runManualScan(chatId, action.slice("scan_again:".length) || preferredVenue(chatId));
+    }
+
+    if (action.startsWith("analyze:")) {
+      const [, symbol, venue] = action.split(":");
+      if (symbol) return runAssetAnalysis(chatId, symbol, venue || preferredVenue(chatId));
+    }
+
+    if (action.startsWith("track:")) {
+      const symbol = action.slice("track:".length);
+      return changeWatchlist(chatId, "add", symbol);
+    }
+
+    if (action.startsWith("watch_remove:")) {
+      return changeWatchlist(chatId, "remove", action.slice("watch_remove:".length), messageId);
+    }
+
+    if (action.startsWith("settings_venue:")) {
+      const venue = normalizeVenue(action.slice("settings_venue:".length));
+      saveUserPreferences(chatId, { preferred_exchange: venue });
+      return showSettings(chatId, messageId);
+    }
+
+    if (action.startsWith("settings_frequency:")) {
+      const frequency = action.slice("settings_frequency:".length);
+      if (!["1h", "4h", "12h"].includes(frequency)) throw new Error("Unsupported alert frequency");
+      saveUserPreferences(chatId, { alert_frequency: frequency });
+      return showSettings(chatId, messageId);
+    }
+
+    if (action.startsWith("settings_sensitivity:")) {
+      const sensitivity = action.slice("settings_sensitivity:".length);
+      if (!["conservative", "balanced", "aggressive"].includes(sensitivity)) throw new Error("Unsupported signal sensitivity");
+      saveUserPreferences(chatId, { signal_sensitivity: sensitivity });
+      return showSettings(chatId, messageId);
+    }
 
 
 
@@ -4584,18 +4863,18 @@ bot.on("callback_query", async (query) => {
 
 
 
-  if (action === "analyze_asset") {
-    return bot.sendMessage(
-      chatId,
-      `Send me the asset you want to analyze.
+    if (action === "analyze_asset") {
+      return bot.sendMessage(
+        chatId,
+        `Send me the asset you want to analyze.
 
 Example:
 Analyze BTC
 
 Or use:
 /analyze BTC`
-    );
-  }
+      );
+    }
 
 
 
@@ -4612,18 +4891,19 @@ Or use:
 
 
 
-  if (action === "set_risk") {
-    return bot.sendMessage(
-      chatId,
-      `Set your risk profile like this:
+    if (action === "set_risk") {
+      await showRiskProfile(chatId);
+      return bot.sendMessage(
+        chatId,
+        `Update your risk profile like this:
 
 /risk 500 1 5
 
 Or say naturally:
 
 I have $500, risk 1%, max leverage 5x`
-    );
-  }
+      );
+    }
 
 
 
@@ -4640,8 +4920,12 @@ I have $500, risk 1%, max leverage 5x`
 
 
 
-  if (action === "show_commands") {
-    return bot.sendMessage(chatId, getHelpMessage());
+    if (action === "show_commands") {
+      return bot.sendMessage(chatId, getHelpMessage());
+    }
+  } catch (error) {
+    console.error("Telegram callback failed:", error);
+    return bot.sendMessage(chatId, formatErrorState("Action unavailable", error));
   }
 });
 
@@ -4679,7 +4963,7 @@ I have $500, risk 1%, max leverage 5x`
 
 
 
-bot.onText(/\/chatid/, async (msg) => {
+bot.onText(/^\/chatid(?:@\w+)?$/i, async (msg) => {
   await bot.sendMessage(
     msg.chat.id,
     `🆔 TELEGRAM CHAT ID
@@ -4724,10 +5008,7 @@ This ID can be used for autonomous Perpsia reports, alerts, and deployment confi
 
 
 
-bot.onText(/\/status/, async (msg) => {
-  const schedulerStatus = autonomousChatId
-    ? "ACTIVE"
-    : "NOT CONFIGURED";
+bot.onText(/^\/status(?:@\w+)?$/i, async (msg) => {
 
 
 
@@ -4744,27 +5025,7 @@ bot.onText(/\/status/, async (msg) => {
 
 
 
-  await bot.sendMessage(
-    msg.chat.id,
-    `🟢 PERPSIA AGENT STATUS
-
-Agent: ONLINE
-Telegram: CONNECTED
-CMC Skill Hub: CONNECTED (LIVE)
-Memory Engine: ACTIVE
-Lifecycle Engine: ACTIVE
-Signal Decay Engine: ACTIVE
-Counter-Thesis Engine: ACTIVE
-Risk Engine: ACTIVE
-Request Queue: ACTIVE
-Multi-Exchange Support: ACTIVE
-Public On-chain Whales: ${process.env.ONCHAIN_ASSET_REGISTRY ? "CONFIGURED" : "DEFAULT ASSETS"}
-Correlation Analysis: Active
-Paper Performance: Active
-Resilience: Active
-Prometheus Metrics: /metrics
-4H Autonomous Scheduler: ${schedulerStatus}`
-  );
+  return showUserStatus(msg.chat.id);
 });
 
 

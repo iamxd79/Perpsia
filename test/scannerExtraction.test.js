@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { extractSymbolsFromScan } = require("../services/scannerV2");
+const { classifyCandidate, extractSymbolsFromScan } = require("../services/scannerV2");
 
 test("extracts candidates from the live ranked-primary CMC report heading", () => {
   const payload = {
@@ -48,4 +48,22 @@ test("extracts symbols from the live ranked candidate table", () => {
     },
   };
   assert.deepEqual(extractSymbolsFromScan(payload), ["AERO", "USDC", "CASHCAT"]);
+});
+
+test("preserves normalized provider records returned in an evidence envelope", () => {
+  const marketEvidence = [{
+    provider: "binance",
+    status: "ok",
+    symbol: "BTC",
+    marketType: "perpetual",
+    price: 60000,
+    perpPrice: 60000,
+    metadata: { pair: "BTCUSDT" },
+  }];
+  const signal = classifyCandidate("BTC", {
+    accumulation: {},
+    perp: {},
+    marketEvidence: { records: marketEvidence },
+  });
+  assert.deepEqual(signal.marketEvidence, marketEvidence);
 });
