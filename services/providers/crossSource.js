@@ -31,7 +31,9 @@ function buildCrossSourceSignals(records = [], options = {}) {
   const usable = records.filter((record) => (
     record &&
     ["ok", "stale", "degraded"].includes(record.status) &&
-    record.freshness?.status !== "missing"
+    record.freshness?.status !== "missing" &&
+    record.usable !== false &&
+    record.freshness?.usable !== false
   ));
   const cex = usable.filter((record) => record.marketType === "perpetual");
   const dex = usable.filter((record) => record.marketType === "spot" && record.metadata?.pairAddress);

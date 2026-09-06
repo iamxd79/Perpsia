@@ -181,7 +181,7 @@ function getStreamDefinition(provider) {
   return streamDefinitions[String(provider || "").toLowerCase()] || null;
 }
 
-function openPublicStream(provider, symbol, onEvidence) {
+function openPublicStream(provider, symbol, onEvidence, options = {}) {
   const definition = getStreamDefinition(provider);
   if (!definition) throw new Error("No public stream definition for " + provider);
   if (typeof WebSocket !== "function") {
@@ -190,6 +190,7 @@ function openPublicStream(provider, symbol, onEvidence) {
   const socket = new WebSocket(definition.url(symbol));
   const state = {};
   socket.addEventListener("open", () => {
+    options.onOpen?.();
     const subscription = definition.subscribe?.(symbol);
     if (!subscription) return;
     for (const message of (Array.isArray(subscription) ? subscription : [subscription])) {
@@ -206,6 +207,12 @@ function openPublicStream(provider, symbol, onEvidence) {
     } catch {
       // A malformed stream message is isolated to this feed.
     }
+  });
+  socket.addEventListener("error", (event) => {
+    options.onError?.(event?.error || event || new Error("WebSocket error"));
+  });
+  socket.addEventListener("close", () => {
+    options.onClose?.();
   });
   return {
     provider: definition.provider,

@@ -13,6 +13,8 @@ test("registers the initial provider catalog without requiring credentials", () 
     "bybit",
     "okx",
     "hyperliquid",
+    "alchemy",
+    "gmgn",
     "dexscreener",
     "geckoterminal",
     "goplus",

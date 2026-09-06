@@ -14,8 +14,15 @@ const PROVIDER_GROUPS = {
   fred: ["MACRO"],
   alternative: ["MACRO"],
   github: ["PROJECT_ACTIVITY"],
+  binance_technical: ["TECHNICAL"],
+  smc: ["TECHNICAL"],
+  grok: ["RESEARCH"],
   whale_alert: ["ONCHAIN"],
   onchain: ["ONCHAIN"],
+  alchemy: ["ONCHAIN"],
+  alchemy_webhook: ["ONCHAIN"],
+  public_rpc: ["ONCHAIN"],
+  gmgn: ["ONCHAIN"],
 };
 
 const CEX_PROVIDERS = ["binance", "bybit", "okx", "hyperliquid"];
@@ -68,10 +75,33 @@ function getEvidenceRecords(signal = {}) {
   const values = [];
   if (Array.isArray(signal.marketEvidence)) values.push(...signal.marketEvidence);
   if (Array.isArray(signal.evidenceRecords)) values.push(...signal.evidenceRecords);
+  if (signal.smc?.status === "available") {
+    values.push({
+      provider: "smc",
+      symbol: signal.symbol,
+      marketType: "technical",
+      status: "ok",
+      sourceConfidence: Math.min(0.85, Number(signal.smc.confidence || 0)),
+      metadata: { direction: signal.smc.direction, biasScore: signal.smc.biasScore },
+    });
+  }
+  if (signal.research?.status === "available" && Number(signal.research.citationCount || 0) > 0) {
+    values.push({
+      provider: "grok",
+      symbol: signal.symbol,
+      marketType: "research",
+      status: "ok",
+      sourceConfidence: Math.min(0.55, Number(signal.research.confidence || 0)),
+      metadata: { direction: signal.research.direction, citationCount: signal.research.citationCount },
+    });
+  }
   return values.filter((item) => item && typeof item === "object");
 }
 
 function evidenceDirection(record) {
+  const declared = String(record.metadata?.direction || record.metadata?.smcDirection || "").toUpperCase();
+  if (declared === "BULLISH" || declared === "LONG") return "LONG";
+  if (declared === "BEARISH" || declared === "SHORT") return "SHORT";
   const priceChange = finiteNumber(record.priceChange24h ?? record.priceChange);
   const orderbookImbalance = finiteNumber(record.orderbook?.imbalance);
   if (orderbookImbalance !== null && Math.abs(orderbookImbalance) >= 0.08) {
@@ -92,6 +122,7 @@ function groupEvidence(signal = {}) {
   const records = getEvidenceRecords(signal);
   for (const record of records) {
     if (record.status && record.status !== "ok") continue;
+    if (record.usable === false || record.freshness?.usable === false || record.freshness?.status === "stale") continue;
     const provider = normalizeProvider(record.provider);
     for (const group of groupForProvider(provider, record)) {
       if (!grouped[group]) {
@@ -139,6 +170,7 @@ function groupEvidence(signal = {}) {
 
   const groups = Object.keys(grouped).sort();
   const conflicts = Array.isArray(signal.conflicts) ? signal.conflicts.length : 0;
+  const providerConflicts = records.reduce((count, record) => count + (Array.isArray(record.metadata?.conflicts) ? record.metadata.conflicts.length : 0), 0);
   const disagreementSignals = Array.isArray(signal.crossSource?.signals)
     ? signal.crossSource.signals.filter((item) => String(item.type || "").includes("DISAGREEMENT")).length
     : 0;
@@ -154,7 +186,7 @@ function groupEvidence(signal = {}) {
     combination: groups.join("+"),
     agreeingGroups,
     directionalGroups,
-    conflictCount: conflicts + disagreementSignals,
+    conflictCount: conflicts + providerConflicts + disagreementSignals,
   };
 }
 
@@ -165,8 +197,24 @@ function calculateSignalConfidence(signal = {}, grouped = groupEvidence(signal))
   let confidence = suppliedNormalized === null
     ? 0.2 + Math.max(0, Math.min(0.65, score / 100 * 0.65))
     : suppliedNormalized;
-  const distinctGroups = grouped.groups.filter((group) => group !== "SECURITY").length;
-  const agreementBonus = Math.min(0.22, Math.max(0, distinctGroups - 1) * 0.055 + grouped.agreeingGroups * 0.025);
+  const groupWeights = {
+    DERIVATIVES: 0.07,
+    SPOT: 0.06,
+    ORDERBOOK: 0.06,
+    TECHNICAL: 0.05,
+    DEX: 0.05,
+    MACRO: 0.045,
+    ONCHAIN: 0.045,
+    PROJECT_ACTIVITY: 0.025,
+    RESEARCH: 0.015,
+  };
+  const independentGroups = grouped.groups.filter((group) => group !== "SECURITY");
+  const independentBonus = independentGroups
+    .slice()
+    .sort((left, right) => (groupWeights[right] || 0) - (groupWeights[left] || 0))
+    .slice(1)
+    .reduce((sum, group) => sum + (groupWeights[group] || 0), 0);
+  const agreementBonus = Math.min(0.22, independentBonus + grouped.agreeingGroups * 0.02);
   confidence += agreementBonus;
   confidence -= Math.min(0.28, grouped.conflictCount * 0.07);
   if (grouped.directionalGroups > 0 && grouped.agreeingGroups === 0) confidence -= 0.12;
@@ -218,6 +266,9 @@ function routeProviders(symbol, options = {}) {
     add("alternative");
     if (options.includeFred && process.env.FRED_API_KEY) add("fred");
   }
+
+  if (process.env.ALCHEMY_ENABLED === "true") add("alchemy");
+  if (process.env.GMGN_ENABLED === "true" && (hasContract || dexAsset || options.gmgnDiscovery)) add("gmgn");
 
   if (options.verifiedOfficialRepository && options.repository) add("github");
   return {

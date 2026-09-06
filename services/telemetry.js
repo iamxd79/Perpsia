@@ -20,6 +20,42 @@ const counterDefinitions = {
     help: "Market scans completed",
     labels: ["source", "status"],
   },
+  perpsia_websocket_reconnects_total: {
+    help: "WebSocket reconnects",
+    labels: ["provider"],
+  },
+  perpsia_websocket_messages_total: {
+    help: "WebSocket messages normalized",
+    labels: ["provider"],
+  },
+  perpsia_websocket_stale_streams: {
+    help: "WebSocket streams that became stale",
+    labels: ["provider"],
+  },
+  perpsia_rest_fallback_total: {
+    help: "REST fallbacks used because a live snapshot was unavailable or stale",
+    labels: ["provider", "reason"],
+  },
+  perpsia_provider_conflicts_total: {
+    help: "Material conflicts between WebSocket and REST evidence",
+    labels: ["provider", "field"],
+  },
+  perpsia_onchain_requests_total: {
+    help: "On-chain provider requests",
+    labels: ["provider", "method", "status"],
+  },
+  perpsia_onchain_events_total: {
+    help: "Normalized on-chain events",
+    labels: ["provider", "status"],
+  },
+  perpsia_onchain_webhook_events_total: {
+    help: "On-chain webhook events accepted",
+    labels: ["provider", "status"],
+  },
+  perpsia_onchain_webhook_duplicates_total: {
+    help: "Duplicate on-chain webhook events ignored",
+    labels: ["provider"],
+  },
 };
 
 const histogramDefinitions = {
@@ -33,6 +69,16 @@ const histogramDefinitions = {
     labels: [],
     buckets: [100, 500, 1000, 5000, 10000],
   },
+  perpsia_live_snapshot_age_ms: {
+    help: "Age of normalized live snapshots",
+    labels: [],
+    buckets: [100, 1000, 5000, 15000, 60000, 300000, 3600000],
+  },
+  perpsia_onchain_latency_ms: {
+    help: "On-chain provider latency in milliseconds",
+    labels: ["provider"],
+    buckets: [100, 500, 1000, 5000, 10000, 30000],
+  },
 };
 
 const counters = new Map();
@@ -40,6 +86,8 @@ const histograms = new Map();
 const gauges = new Map([
   ["perpsia_up", 1],
   ["perpsia_open_signals", 0],
+  ["perpsia_websocket_connections_active", 0],
+  ["perpsia_live_snapshots_usable", 0],
 ]);
 
 function labelsKey(labels) {

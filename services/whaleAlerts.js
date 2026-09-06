@@ -1,4 +1,5 @@
 const axios = require("axios");
+const { normalizeEvidence } = require("./providers/evidence");
 
 
 const TRANSFER_TOPIC =
@@ -265,6 +266,13 @@ function normalizeAssetConfigs(symbol) {
         decimals: Number.isInteger(Number(entry.decimals))
           ? Number(entry.decimals)
           : null,
+        watchedAddresses: Array.isArray(entry.watchedAddresses || entry.watched_addresses)
+          ? (entry.watchedAddresses || entry.watched_addresses)
+              .map((item) => typeof item === "string"
+                ? { address: item, label: "Watched Wallet" }
+                : { address: item?.address, label: item?.label || item?.name || "Watched Wallet" })
+              .filter((item) => item.address)
+          : [],
       };
     })
     .filter(Boolean);
@@ -365,6 +373,7 @@ function makeMove({
   toLabel,
   toIsExchange,
   chain,
+  source,
 }) {
   return {
     hash: hash || null,
@@ -388,7 +397,7 @@ function makeMove({
         ? "FROM_EXCHANGE"
         : "WALLET_TO_WALLET",
     chain: normalizeChain(chain),
-    source: "PUBLIC_RPC",
+    source: source || "PUBLIC_RPC",
   };
 }
 
@@ -943,10 +952,49 @@ function buildActivity(
     : null;
 
 
+  const provider = options.provider || "PUBLIC_RPC";
+  const sourceType = options.sourceType || "rest";
+  const totalFlow = limitedMoves.reduce((sum, move) => sum + Number(move.valueUsd || 0), 0);
+  const fromExchange = limitedMoves.filter((move) => move.fromIsExchange).reduce((sum, move) => sum + Number(move.valueUsd || 0), 0);
+  const toExchange = limitedMoves.filter((move) => move.toIsExchange).reduce((sum, move) => sum + Number(move.valueUsd || 0), 0);
+  const uniqueWallets = new Set(limitedMoves.flatMap((move) => [move.from, move.to]).filter(Boolean).map(normalizeAddress));
+  const walletConvergence = limitedMoves.length
+    ? Number(Math.min(1, uniqueWallets.size / Math.max(1, limitedMoves.length)).toFixed(4))
+    : null;
+  const halfWindowMs = Math.max(1, Number(options.lookbackHours || DEFAULT_LOOKBACK_HOURS)) * 60 * 60 * 1000 / 2;
+  const midpoint = Date.now() - halfWindowMs;
+  const recentFlow = limitedMoves.filter((move) => move.timestamp >= midpoint).reduce((sum, move) => sum + Number(move.valueUsd || 0), 0);
+  const previousFlow = limitedMoves.filter((move) => move.timestamp < midpoint).reduce((sum, move) => sum + Number(move.valueUsd || 0), 0);
+  const flowAcceleration = previousFlow > 0 ? Number((recentFlow / previousFlow - 1).toFixed(4)) : null;
+  const accumulationScore = totalFlow > 0 ? Number(Math.max(-100, Math.min(100, ((fromExchange - toExchange) / totalFlow) * 100)).toFixed(2)) : null;
+  const distributionScore = totalFlow > 0 ? Number(Math.max(-100, Math.min(100, ((toExchange - fromExchange) / totalFlow) * 100)).toFixed(2)) : null;
+  const evidence = normalizeEvidence({
+    provider: provider.toLowerCase(),
+    symbol,
+    marketType: "onchain",
+    sourceType,
+    timestamp: limitedMoves[0]?.timestamp || Date.now(),
+    volume: totalFlow,
+    status: limitedMoves.length ? "ok" : "insufficient_data",
+    sourceConfidence: provider.toLowerCase() === "alchemy" ? 0.86 : 0.62,
+    metadata: {
+      evidenceGroup: "ONCHAIN",
+      transferCount: limitedMoves.length,
+      volumeToExchanges: toExchange,
+      volumeFromExchanges: fromExchange,
+      walletConvergence,
+      accumulationScore,
+      distributionScore,
+      flowAcceleration,
+      eventKeys: limitedMoves.map((move) => move.eventKey || move.hash).filter(Boolean),
+      provider,
+    },
+  });
+
   return {
     status: limitedMoves.length ? "available" : "insufficient_data",
     symbol,
-    provider: "PUBLIC_RPC",
+    provider,
     lookbackHours: Number(options.lookbackHours || DEFAULT_LOOKBACK_HOURS),
     minValueUsd: Number(options.minValueUsd || DEFAULT_MIN_VALUE_USD),
     transactions: limitedMoves,
@@ -975,6 +1023,11 @@ function buildActivity(
       : "configured",
     warnings: [...new Set(warnings)],
     unpricedTransfers,
+    walletConvergence,
+    accumulationScore,
+    distributionScore,
+    flowAcceleration,
+    evidence,
   };
 }
 
@@ -1015,6 +1068,19 @@ async function collectPublicWhaleActivity(symbol, options = {}) {
       normalizedSymbol,
       "No ONCHAIN_ASSET_REGISTRY entry exists for $" + normalizedSymbol + "."
     );
+  }
+
+  if (options.skipAlchemy !== true && process.env.ALCHEMY_ENABLED === "true") {
+    try {
+      const { collectAlchemyActivity } = require("./providers/alchemy");
+      const alchemyActivity = await collectAlchemyActivity(normalizedSymbol, {
+        ...options,
+        assets,
+      });
+      if (alchemyActivity.status !== "unavailable") return alchemyActivity;
+    } catch (error) {
+      console.warn("Alchemy on-chain provider unavailable: " + error.message);
+    }
   }
 
 
@@ -1101,6 +1167,8 @@ async function checkWhaleActivity(symbol, options = {}) {
     limit,
     process.env.ONCHAIN_ASSET_REGISTRY || "defaults",
     process.env.ONCHAIN_EXCHANGE_ADDRESSES || "no-exchange-registry",
+    process.env.ALCHEMY_ENABLED || "false",
+    process.env.ALCHEMY_NETWORKS || "defaults",
   ].join(":");
   const cached = publicCache.get(cacheKey);
 
@@ -1150,6 +1218,7 @@ async function checkWhaleActivity(symbol, options = {}) {
 function clearWhaleCache() {
   publicCache.clear();
   priceCache.clear();
+  try { require("./providers/alchemy").clearAlchemyCache(); } catch {}
 }
 
 
@@ -1157,6 +1226,12 @@ module.exports = {
   checkWhaleActivity,
   collectPublicWhaleActivity,
   normalizeAssetConfigs,
+  getAssetRegistry,
+  getExchangeRegistry,
+  exchangeLabel,
+  getPriceUsd,
+  makeMove,
+  buildActivity,
   normalizeWhaleTransactions,
   summarizeWhaleMoves,
   formatUsd,

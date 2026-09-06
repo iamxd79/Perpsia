@@ -1,5 +1,7 @@
 "use strict";
 
+const { applyFreshness, evaluateFreshness } = require("./freshness");
+
 function finiteNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
@@ -29,23 +31,12 @@ function normalizeOrderbook(orderbook) {
   };
 }
 
-function normalizeFreshness(timestamp, freshness, now = Date.now()) {
-  if (freshness && typeof freshness === "object") {
-    return {
-      ageMs: finiteNumber(freshness.ageMs),
-      status: String(freshness.status || "unknown"),
-      maxAgeMs: finiteNumber(freshness.maxAgeMs),
-    };
-  }
-  const time = finiteNumber(timestamp);
-  if (time === null) return { ageMs: null, status: "missing", maxAgeMs: null };
-  const ageMs = Math.max(0, now - time);
-  const maxAgeMs = 120000;
-  return {
-    ageMs,
-    status: ageMs <= maxAgeMs ? "fresh" : "stale",
-    maxAgeMs,
-  };
+function normalizeFreshness(timestamp, freshness, now = Date.now(), context = {}) {
+  return evaluateFreshness({
+    ...context,
+    timestamp,
+    freshness,
+  }, now, freshness);
 }
 
 function normalizeEvidence(input = {}) {
@@ -55,6 +46,10 @@ function normalizeEvidence(input = {}) {
     provider: String(input.provider || "unknown"),
     symbol: String(input.symbol || "").toUpperCase(),
     timestamp,
+    fetchedAt: input.fetchedAt || new Date().toISOString(),
+    updatedAt: input.updatedAt || new Date(timestamp).toISOString(),
+    sourceType: String(input.sourceType || input.metadata?.sourceType || "rest"),
+    evidenceGroup: input.evidenceGroup || input.metadata?.evidenceGroup || null,
     marketType: input.marketType ? String(input.marketType) : null,
     chain: input.chain ? String(input.chain) : null,
     price: finiteNumber(input.price),
@@ -72,7 +67,7 @@ function normalizeEvidence(input = {}) {
       ? null
       : clamp(input.securityRisk, 0, 100),
     sourceConfidence: clamp(input.sourceConfidence ?? (status === "ok" ? 0.8 : 0), 0, 1) ?? 0,
-    freshness: normalizeFreshness(timestamp, input.freshness),
+    freshness: normalizeFreshness(timestamp, input.freshness, Date.now(), input),
     status,
     error: input.error ? String(input.error) : null,
     metadata: input.metadata && typeof input.metadata === "object" ? input.metadata : {},
@@ -81,7 +76,20 @@ function normalizeEvidence(input = {}) {
     normalized.sourceConfidence = 0;
     normalized.freshness = { ageMs: null, status: "missing", maxAgeMs: null };
   }
-  return normalized;
+  const withFreshness = applyFreshness(normalized);
+  if (status === "unavailable") {
+    withFreshness.usable = false;
+    withFreshness.stale = false;
+    withFreshness.freshness = {
+      ageMs: null,
+      status: "missing",
+      maxAgeMs: null,
+      freshnessClass: withFreshness.freshness?.freshnessClass || "default",
+      usable: false,
+      reason: normalized.error || "provider is unavailable",
+    };
+  }
+  return withFreshness;
 }
 
 function unavailableEvidence(provider, symbol, error, metadata = {}) {

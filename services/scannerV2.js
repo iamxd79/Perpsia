@@ -27,6 +27,9 @@ const { RequestQueue } = require("./queue");
 const { collectMarketEvidence } = require("./providers/publicProviders");
 const { buildCrossSourceSignals } = require("./providers/crossSource");
 const { routeProviders, calculateSignalConfidence } = require("./signalQuality");
+const { analyzeTechnicalContext } = require("./technicalAnalysis");
+const { buildFundamentalContext } = require("./fundamentalAnalysis");
+const { researchAsset } = require("./grokResearch");
 
 
 
@@ -2225,13 +2228,19 @@ function classifyCandidate(symbol, packs) {
   const liquidationFlow = packs.liquidation || null;
   const whaleActivity = packs.whaleActivity || null;
   const correlation = packs.correlation || null;
+  const technical = packs.technical || null;
+  const smc = technical?.smc || packs.smc || null;
+  const fundamental = packs.fundamental || null;
+  const research = packs.research || null;
   const marketEvidence = Array.isArray(packs.marketEvidence)
     ? packs.marketEvidence
     : Array.isArray(packs.marketEvidence?.records)
       ? packs.marketEvidence.records
       : [];
   const crossSource = packs.crossSource || buildCrossSourceSignals(marketEvidence);
-  const securityBlocked = Boolean(crossSource.signals.some((signal) => signal.hardRisk));
+  const securityBlocked = Boolean(
+    crossSource.signals.some((signal) => signal.hardRisk) || fundamental?.hardRisk
+  );
 
 
 
@@ -2621,6 +2630,50 @@ ${mtfText}
 
   if (bullishPerp && bearishPerp) {
     conflicts.push("Perp flow contains both bullish and bearish evidence.");
+  }
+
+  if (smc?.status === "available") {
+    const smcDirection = String(smc.direction || "NEUTRAL").toUpperCase();
+    const aligned = (direction === "Bullish" && smcDirection === "BULLISH") ||
+      (direction === "Bearish" && smcDirection === "BEARISH");
+    const opposed = (direction === "Bullish" && smcDirection === "BEARISH") ||
+      (direction === "Bearish" && smcDirection === "BULLISH");
+    const adjustment = direction === "Bullish"
+      ? Number(smc.scoreAdjustment || 0)
+      : direction === "Bearish"
+        ? -Number(smc.scoreAdjustment || 0)
+        : 0;
+    score += Math.max(-12, Math.min(12, adjustment));
+    reasons.push(...(smc.evidence || []).slice(0, 3).map((item) => "SMC: " + item));
+    if (aligned) reasons.push("Deterministic SMC structure agrees with the directional thesis.");
+    if (opposed) conflicts.push("Deterministic SMC structure conflicts with the directional thesis.");
+  }
+
+  if (fundamental?.risks?.length) {
+    reasons.push(...fundamental.risks.map((item) => "Fundamental risk: " + item));
+  }
+  if (fundamental?.catalysts?.length) {
+    reasons.push(...fundamental.catalysts.map((item) => "Fundamental context: " + item));
+  }
+  if (research?.status === "available") {
+    const cited = Number(research.citationCount || 0) > 0;
+    const researchDirection = String(research.direction || "NEUTRAL").toUpperCase();
+    const aligned = cited && research.confidence >= 0.6 && (
+      (direction === "Bullish" && researchDirection === "BULLISH") ||
+      (direction === "Bearish" && researchDirection === "BEARISH")
+    );
+    const opposed = cited && research.confidence >= 0.6 && (
+      (direction === "Bullish" && researchDirection === "BEARISH") ||
+      (direction === "Bearish" && researchDirection === "BULLISH")
+    );
+    if (aligned) {
+      score += 3;
+      reasons.push("Fresh Grok research provides cited narrative confirmation.");
+    } else if (opposed) {
+      score -= 3;
+      conflicts.push("Fresh Grok research provides cited evidence against the directional thesis.");
+    }
+    if (research.narrative) reasons.push("Research context: " + research.narrative);
   }
 
 
@@ -3330,6 +3383,8 @@ ${mtfText}
     hasCoreData,
     marketEvidence,
     crossSource,
+    smc,
+    research,
   });
 
   return {
@@ -3413,6 +3468,10 @@ ${mtfText}
     whaleActivity,
     correlation,
     divergences,
+    technical,
+    smc,
+    fundamental,
+    research,
     marketEvidence,
     crossSource,
 
@@ -4141,6 +4200,10 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
       const marketEvidence = await collectMarketEvidence(symbol, {
         providers: routeProviders(symbol, { venue, ...options }).providers,
         venue,
+        chain: options.gmgnChain || options.chain || options.network,
+        gmgnChain: options.gmgnChain,
+        contractAddress: options.contractAddress || options.tokenAddress,
+        tokenAddress: options.tokenAddress,
         cmcEvidence: {
           metadata: {
             skills: ["detect_accumulation_breakout_transition", "perp_contract_analysis", "review_perp_orderbook_pressure", "analyze_multi_timeframe_trend_alignment"],
@@ -4151,6 +4214,46 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
+      await onProgress({
+        percent: basePercent + 18,
+        stage: "$" + symbol + " TA / SMC",
+        message: "📐 Calculating deterministic technical structure and SMC patterns...",
+      });
+
+      const technical = await analyzeTechnicalContext(symbol, {
+        enabled: options.enableTechnical !== false,
+        interval: options.technicalInterval || "1h",
+        limit: options.technicalCandleLimit || 240,
+      });
+      const supplementalOnchainEvidence = whaleActivity?.evidence &&
+        !(marketEvidence.records || []).some((record) => record.provider === whaleActivity.evidence.provider)
+        ? [whaleActivity.evidence]
+        : [];
+      const evidenceRecords = [
+        ...(marketEvidence.records || []),
+        ...supplementalOnchainEvidence,
+        ...(technical.evidence ? [technical.evidence] : []),
+      ];
+      const fundamental = buildFundamentalContext(evidenceRecords);
+      const baseSignal = classifyCandidate(symbol, {
+        accumulation,
+        perp,
+        orderbook,
+        liquidation,
+        whaleActivity,
+        correlation,
+        mtf,
+        technical,
+        fundamental,
+        marketEvidence: evidenceRecords,
+      });
+      const research = await researchAsset({
+        symbol,
+        signal: baseSignal,
+        evidence: evidenceRecords,
+        options: { enabled: options.enableGrokResearch === true },
+      });
+
       const result = {
         ...classifyCandidate(symbol, {
           accumulation,
@@ -4160,7 +4263,10 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
           whaleActivity,
           correlation,
           mtf,
-          marketEvidence,
+          technical,
+          fundamental,
+          research,
+          marketEvidence: evidenceRecords,
         }),
         venue,
       };
@@ -4698,6 +4804,10 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
   const marketEvidence = await collectMarketEvidence(symbol, {
         providers: routeProviders(symbol, { venue, ...options }).providers,
     venue,
+    chain: options.gmgnChain || options.chain || options.network,
+    gmgnChain: options.gmgnChain,
+    contractAddress: options.contractAddress || options.tokenAddress,
+    tokenAddress: options.tokenAddress,
     cmcEvidence: {
       metadata: {
         skills: ["detect_accumulation_breakout_transition", "perp_contract_analysis", "review_perp_orderbook_pressure", "analyze_multi_timeframe_trend_alignment"],
@@ -4708,6 +4818,46 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
+  await onProgress({
+    percent: 98,
+    stage: "$" + symbol + " TA / SMC",
+    message: "📐 Calculating deterministic technical structure and SMC patterns...",
+  });
+
+  const technical = await analyzeTechnicalContext(symbol, {
+    enabled: options.enableTechnical !== false,
+    interval: options.technicalInterval || "1h",
+    limit: options.technicalCandleLimit || 240,
+  });
+  const supplementalOnchainEvidence = whaleActivity?.evidence &&
+    !(marketEvidence.records || []).some((record) => record.provider === whaleActivity.evidence.provider)
+    ? [whaleActivity.evidence]
+    : [];
+  const evidenceRecords = [
+    ...(marketEvidence.records || []),
+    ...supplementalOnchainEvidence,
+    ...(technical.evidence ? [technical.evidence] : []),
+  ];
+  const fundamental = buildFundamentalContext(evidenceRecords);
+  const baseSignal = classifyCandidate(symbol, {
+    accumulation,
+    perp,
+    orderbook,
+    liquidation,
+    whaleActivity,
+    correlation,
+    mtf,
+    technical,
+    fundamental,
+    marketEvidence: evidenceRecords,
+  });
+  const research = await researchAsset({
+    symbol,
+    signal: baseSignal,
+    evidence: evidenceRecords,
+    options: { enabled: options.enableGrokResearch === true },
+  });
+
   return {
     ...classifyCandidate(symbol, {
       accumulation,
@@ -4717,7 +4867,10 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
       whaleActivity,
       correlation,
       mtf,
-      marketEvidence,
+      technical,
+      fundamental,
+      research,
+      marketEvidence: evidenceRecords,
     }),
     venue,
   };

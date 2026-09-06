@@ -303,6 +303,11 @@ const {
   getProviderCatalog,
   getProviderHealth,
 } = require("./services/providers/publicProviders");
+const { getAlchemyHealth, recordAlchemyWebhook, verifyAlchemySignature } = require("./services/providers/alchemy");
+const { getGmgnHealth } = require("./services/providers/gmgn");
+const { getOnchainStoreHealth } = require("./services/onchainStore");
+const { getStreamManager } = require("./services/providers/streamManager");
+const { getSnapshotHealth } = require("./services/providers/liveSnapshotStore");
 const {
   ABOUT_MESSAGE,
   HELP_MESSAGE,
@@ -414,6 +419,24 @@ function performanceDashboardHtml(payload) {
 
 
 
+function readRequestBody(req, maxBytes = 5 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(new Error("Request body is too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
+}
+
 async function handleHttpRequest(req, res) {
   const requestUrl = new URL(req.url || "/", "http://perpsia.local");
 
@@ -425,6 +448,62 @@ async function handleHttpRequest(req, res) {
 
 
   try {
+    if (requestUrl.pathname === "/webhooks/alchemy") {
+      if (req.method !== "POST") {
+        res.writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" });
+        res.end(JSON.stringify({ error: "Method not allowed" }));
+        return;
+      }
+      const rawBody = await readRequestBody(req);
+      const signature = req.headers["x-alchemy-signature"];
+      if (!verifyAlchemySignature(rawBody, signature)) {
+        res.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Invalid Alchemy webhook signature" }));
+        return;
+      }
+      let payload;
+      try {
+        payload = JSON.parse(rawBody);
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "Invalid JSON payload" }));
+        return;
+      }
+      const result = recordAlchemyWebhook(payload);
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ status: "accepted", provider: "alchemy", ...result }));
+      return;
+    }
+
+    if (requestUrl.pathname === "/health") {
+      const providers = getProviderHealth();
+      const streamHealth = getStreamManager().getHealth();
+      const snapshots = getSnapshotHealth();
+      const degraded = providers.some((item) => ["circuit_open", "offline"].includes(String(item.status || "").toLowerCase())) ||
+        streamHealth.some((item) => ["degraded", "stale"].includes(String(item.status || "").toLowerCase()));
+      res.writeHead(degraded ? 503 : 200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      res.end(JSON.stringify({
+        status: degraded ? "degraded" : "ok",
+        service: "Perpsia Terminal",
+        storage: getStorageInfo(),
+        signal_quality: getSignalQualityHealth(),
+        onchain: {
+          storage: getOnchainStoreHealth(),
+          alchemy: getAlchemyHealth(),
+          gmgn: getGmgnHealth(),
+        },
+        providers,
+        realtime: {
+          streams: streamHealth,
+          snapshots,
+        },
+      }));
+      return;
+    }
+
     if (requestUrl.pathname === "/metrics") {
       res.writeHead(200, {
         "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
@@ -542,6 +621,8 @@ async function handleHttpRequest(req, res) {
           "request-queue",
           "backtester-ready",
           "public-onchain-whales",
+          "alchemy-onchain-evidence",
+          "gmgn-read-only-intelligence",
           "correlation-analysis",
           "performance-leaderboard",
           "resilience-retries-circuit-breaker",
@@ -558,13 +639,23 @@ async function handleHttpRequest(req, res) {
           performance_trades: "/api/performance/trades",
           signal_quality: "/api/signal-quality",
           health: "/health",
+          alchemy_webhook: "/webhooks/alchemy",
         },
         circuit_breaker: cmcCircuitBreaker.snapshot(),
         storage: getStorageInfo(),
         signal_quality: getSignalQualityHealth(),
+        onchain: {
+          storage: getOnchainStoreHealth(),
+          alchemy: getAlchemyHealth(),
+          gmgn: getGmgnHealth(),
+        },
         providers: {
           catalog: getProviderCatalog(),
           health: getProviderHealth(),
+        },
+        realtime: {
+          streams: getStreamManager().getHealth(),
+          snapshots: getSnapshotHealth(),
         },
       })
     );
@@ -5079,6 +5170,9 @@ void startTelegramPolling();
 
 
 
+const streamManager = getStreamManager();
+streamManager.start();
+
 startScheduler({
   bot,
   chatId: autonomousChatId,
@@ -5136,13 +5230,26 @@ const PORT = process.env.PORT || 3000;
 
 
 
-http
+const healthServer = http
   .createServer((req, res) => {
     void handleHttpRequest(req, res);
   })
   .listen(PORT, () => {
     console.log("Perpsia health and metrics server listening on port " + PORT);
   });
+
+function shutdown(signal) {
+  structuredLog("info", "shutdown_started", { signal });
+  streamManager.stop();
+  try { bot.stopPolling?.(); } catch (error) {
+    structuredLog("warn", "telegram_polling_stop_failed", { message: error.message });
+  }
+  healthServer.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 5000).unref?.();
+}
+
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));
 // ==========================================
 // STARTUP
 // ==========================================

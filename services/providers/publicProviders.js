@@ -73,6 +73,9 @@ const {
 } = require("./registry");
 const { listPublicStreams } = require("./streams");
 const { normalizeEvidence } = require("./evidence");
+const { getStreamManager } = require("./streamManager");
+const { collectAlchemyEvidence } = require("./alchemy");
+const { collectGmgnEvidence } = require("./gmgn");
 
 
 
@@ -2615,7 +2618,7 @@ registerProvider({
   category: "derivatives",
   authentication: "none",
   rateLimit: "public exchange limits; request weight applies",
-  transport: "REST",
+  transport: "REST+WebSocket",
   cacheTtlMs: 15000,
   collect: fetchBinance,
 });
@@ -2689,7 +2692,7 @@ registerProvider({
   category: "derivatives",
   authentication: "none",
   rateLimit: "public exchange limits",
-  transport: "REST",
+  transport: "REST+WebSocket",
   cacheTtlMs: 15000,
   collect: fetchBybit,
 });
@@ -2763,7 +2766,7 @@ registerProvider({
   category: "derivatives",
   authentication: "none",
   rateLimit: "public exchange limits; IP based",
-  transport: "REST",
+  transport: "REST+WebSocket",
   cacheTtlMs: 15000,
   collect: fetchOkx,
 });
@@ -2837,9 +2840,33 @@ registerProvider({
   category: "derivatives",
   authentication: "none",
   rateLimit: "public info endpoint limits",
-  transport: "REST",
+  transport: "REST+WebSocket",
   cacheTtlMs: 15000,
   collect: fetchHyperliquid,
+});
+
+registerProvider({
+  id: "alchemy",
+  name: "Alchemy On-chain",
+  category: "onchain",
+  authentication: "ALCHEMY_API_KEY",
+  rateLimit: "Alchemy plan limits; degraded evidence when unavailable",
+  transport: "REST+Webhook",
+  cacheTtlMs: 120000,
+  sourceConfidence: 0.86,
+  collect: collectAlchemyEvidence,
+});
+
+registerProvider({
+  id: "gmgn",
+  name: "GMGN Read-only Intelligence",
+  category: "onchain-smart-money",
+  authentication: "GMGN_API_KEY",
+  rateLimit: "GMGN OpenAPI account limits; 429 responses are health-tracked",
+  transport: "REST",
+  cacheTtlMs: 60000,
+  sourceConfidence: 0.78,
+  collect: collectGmgnEvidence,
 });
 
 
@@ -3424,9 +3451,15 @@ registerProvider({
 
 
 function defaultProviderIds(options = {}) {
-  if (Array.isArray(options.providers) && options.providers.length) return options.providers;
+  if (Array.isArray(options.providers) && options.providers.length) {
+    const providers = [...options.providers];
+    if (process.env.ALCHEMY_ENABLED === "true" && !providers.includes("alchemy")) providers.push("alchemy");
+    return providers;
+  }
   if (process.env.PERPSIA_PROVIDER_LIST) {
-    return process.env.PERPSIA_PROVIDER_LIST.split(",").map((item) => item.trim()).filter(Boolean);
+    const providers = process.env.PERPSIA_PROVIDER_LIST.split(",").map((item) => item.trim()).filter(Boolean);
+    if (process.env.ALCHEMY_ENABLED === "true" && !providers.includes("alchemy")) providers.push("alchemy");
+    return providers;
   }
   const ids = ["binance", "bybit", "okx", "hyperliquid", "dexscreener", "alternative"];
   if (options.includeGecko || process.env.PERPSIA_ENABLE_GECKO === "true") ids.push("geckoterminal");
@@ -3435,6 +3468,7 @@ function defaultProviderIds(options = {}) {
     if (options.contractAddress || process.env.PERPSIA_TOKEN_CONTRACT) ids.push("goplus", "honeypot");
     if (options.repository || process.env.GITHUB_REPOSITORY) ids.push("github");
   }
+  if (process.env.ALCHEMY_ENABLED === "true") ids.push("alchemy");
   return ids;
 }
 
@@ -3518,7 +3552,11 @@ async function collectMarketEvidence(symbol, options = {}) {
     symbol: normalizeAssetSymbol(symbol),
     cacheKey: options.cacheKey || normalizeAssetSymbol(symbol),
   };
-  const records = await collectProviders(defaultProviderIds(options), context);
+  const providerIds = defaultProviderIds(options);
+  if (process.env.PERPSIA_ENABLE_WEBSOCKETS !== "false") {
+    getStreamManager().ensureSubscriptions(providerIds, context.symbol);
+  }
+  const records = await collectProviders(providerIds, context);
   const cmcEvidence = options.cmcEvidence
     ? normalizeEvidence({
         provider: "coinmarketcap",
@@ -3551,7 +3589,11 @@ async function collectMarketEvidence(symbol, options = {}) {
     sources: allRecords.map((record) => ({
       provider: record.provider,
       status: record.status,
+      sourceType: record.sourceType || record.metadata?.sourceType || "rest",
       timestamp: record.timestamp,
+      ageMs: record.freshness?.ageMs ?? null,
+      stale: record.freshness?.status === "stale",
+      usable: record.usable !== false && record.freshness?.usable !== false,
       fields: Object.keys(record).filter((key) => !["provider", "symbol", "metadata", "error"].includes(key) && record[key] !== null),
       attribution: record.metadata?.attribution || record.metadata?.exchange || record.provider,
     })),

@@ -198,6 +198,8 @@ Registered providers:
 - Alternative.me Crypto Fear & Greed;
 - FRED macro observations;
 - GitHub public repository activity;
+- Alchemy Address Activity and EVM JSON-RPC on-chain evidence (optional);
+- GMGN read-only token, Smart Money, market, security, pool, and wallet intelligence (optional);
 - public WebSocket stream adapters for the four derivative venues.
 
 The default bounded scan uses CMC plus Binance, Bybit, OKX, Hyperliquid, DexScreener, and Alternative.me. GeckoTerminal and the optional contract, macro, and project providers are enabled only when their required context or configuration is present. This prevents PerpsIA from inventing a token contract, project repository, or unavailable macro value.
@@ -213,10 +215,64 @@ The default bounded scan uses CMC plus Binance, Bybit, OKX, Hyperliquid, DexScre
     PERPSIA_TOKEN_CHAIN_ID=1
     GITHUB_REPOSITORY=owner/repository
     GITHUB_TOKEN=
+    PERPSIA_ENABLE_TECHNICAL_CONTEXT=true
+    PERPSIA_ENABLE_GROK_RESEARCH=false
+    XAI_API_KEY=
+    XAI_MODEL=grok-4.6
+    XAI_RESEARCH_TIMEOUT_MS=12000
+    PERPSIA_ENABLE_WEBSOCKETS=true
+    PERPSIA_WS_STALE_MS=30000
+    PERPSIA_WS_IDLE_TTL_MS=900000
+    ALCHEMY_ENABLED=false
+    ALCHEMY_API_KEY=
+    ALCHEMY_TIMEOUT_MS=8000
+    ALCHEMY_NETWORKS=ethereum,base,arbitrum,bnb,polygon
+    ALCHEMY_WEBHOOK_SIGNING_KEY=
+    GMGN_ENABLED=false
+    GMGN_API_KEY=
+    GMGN_TIMEOUT_MS=8000
 
 CEX, DEX, sentiment, security, macro, and project credentials are read server-side only. Public CEX/DEX/Alternative.me/GoPlus/Honeypot calls do not require an API key. FRED requires FRED_API_KEY; GitHub works unauthenticated at its lower public limit and can use the server-only GITHUB_TOKEN for a higher limit.
 
-/health reports the provider catalog, transport, current status, freshness-related failures, retry-after information, and circuit-breaker state. services/providers/streams.js provides public WebSocket subscriptions for high-frequency consumers; the Telegram scan remains request-bounded and uses the same normalized evidence contract.
+/health reports the provider catalog, REST and WebSocket status, current subscriptions, reconnects, last successful messages, freshness failures, retry-after information, and circuit-breaker state. services/providers/streamManager.js keeps deduplicated subscriptions alive for symbols actually being analyzed, while services/providers/liveSnapshotStore.js exposes normalized live snapshots. The Telegram scan remains request-bounded and uses the same normalized evidence contract.
+
+### Alchemy on-chain evidence
+
+Alchemy is an optional primary raw on-chain provider inside the existing `ONCHAIN` evidence group. It does not create a second scoring path. When enabled, the provider uses `alchemy_getAssetTransfers` for ERC-20 transfer activity, `alchemy_getTokenMetadata` for token metadata, and `alchemy_getTokenBalances` for configured watched addresses. Existing public JSON-RPC collection remains the fallback when Alchemy is disabled, unconfigured, rate-limited, or stale. Known exchange attribution comes only from `ONCHAIN_EXCHANGE_ADDRESSES`; unknown addresses remain wallets.
+
+Supported configured EVM networks are Ethereum, Base, Arbitrum, Optimism, Polygon, and BNB Smart Chain. The default list is controlled by `ALCHEMY_NETWORKS`. Asset contracts remain in the existing `ONCHAIN_ASSET_REGISTRY`; entries may include `watchedAddresses` or `watched_addresses` arrays. Exchange addresses remain in `ONCHAIN_EXCHANGE_ADDRESSES`, so Alchemy and the public-RPC fallback use the same address registry.
+
+Configure the Alchemy Address Activity webhook to POST to `https://<your-render-service>/webhooks/alchemy`. The endpoint verifies the raw body with `X-Alchemy-Signature` and `ALCHEMY_WEBHOOK_SIGNING_KEY`, then inserts events into the existing persistent SQLite database with an idempotent event key. The signing key is copied from the webhook's detail page in the Alchemy Dashboard after the webhook is created. Webhook events are attributed as `alchemy_webhook` and are deduplicated against transfer polling before entering normalized ONCHAIN evidence.
+
+The `/health` response includes `onchain.storage`, `onchain.alchemy`, and the provider catalog. Prometheus `/metrics` includes Alchemy request latency, request status, event ingestion, and webhook duplicate counters. No Alchemy secret is sent to the frontend or written to logs.
+
+### GMGN read-only intelligence
+
+GMGN is an optional read-only provider. When enabled for a token with an explicit `gmgnChain` and contract address, PerpsIA queries the official OpenAPI read-auth routes for token info, security, pool data, Smart Money-tagged holders/traders, and public Smart Money activity. Market trending and Trenches helpers are available through the same provider module for discovery workflows. The normalized result is added to the existing `ONCHAIN` evidence group with `providerClass: GMGN_READ_ONLY`; it is not a separate scoring engine and it cannot create a LONG or SHORT decision by itself.
+
+Only `GMGN_API_KEY` is used. `GMGN_PRIVATE_KEY` is intentionally excluded. PerpsIA never calls GMGN swap, order, strategy, cooking, follow-wallet, or holdings routes. Wallet activity and wallet statistics are available only for explicitly supplied public wallet addresses through read-auth routes. GMGN and Alchemy are treated as the same ONCHAIN evidence class, and transaction/wallet/token identifiers are retained for deduplication and attribution.
+
+Set these server-side values on Render:
+
+    GMGN_ENABLED=true
+    GMGN_API_KEY=
+    GMGN_TIMEOUT_MS=8000
+
+The official GMGN client uses `https://openapi.gmgn.ai`, `X-APIKEY`, and short-lived `timestamp`/`client_id` query parameters for normal read-auth requests. See the [official GMGN client](https://github.com/GMGNAI/gmgn-skills/blob/main/src/client/OpenApiClient.ts) for the published request contract. Never expose `GMGN_API_KEY` in frontend code.
+
+### Live freshness and fallback
+
+For Binance, Bybit, OKX, and Hyperliquid, a fresh WebSocket snapshot is preferred when it exists. REST remains the bootstrap, reconciliation, and fallback source. If both sources are stale, the evidence is marked unusable and cannot increase confidence. Freshness thresholds are centralized by evidence class: order book 5 seconds, price 15 seconds, derivatives 2 minutes, DEX 3 minutes, technical 2 minutes, macro 1 hour, project activity 6 hours, security 24 hours, and research 30 minutes.
+
+When WebSocket and REST disagree materially, the record keeps both timestamps and values in reconciliation metadata, confidence is reduced through the existing evidence-quality pipeline, and the event is counted in Prometheus metrics. No second scoring engine is introduced.
+
+### Deterministic TA and SMC layer
+
+PerpsIA now calculates a deterministic technical context from public Binance futures OHLCV before it asks any research model for interpretation. The SMC-style layer reports observable price-structure patterns such as market structure, BOS/CHoCH, liquidity sweeps, equal levels, fair value gaps, order blocks, displacement, and premium/discount zones. These labels describe price action; they are not treated as proof of institutional intent.
+
+### Grok research layer
+
+Grok is an optional secondary research source. When enabled with `PERPSIA_ENABLE_GROK_RESEARCH=true` and `XAI_API_KEY`, PerpsIA can use xAI Web Search and X Search to collect fresh, cited catalysts, narratives, and sentiment. Grok cannot create a direction, entry, stop, target, or actionable signal by itself. Structured market data and deterministic PerpsIA rules remain authoritative, and uncited or unavailable research is ignored for confidence.
 
 ---
 
@@ -640,6 +696,14 @@ PERFORMANCE_CORS_ORIGIN=
 ONCHAIN_RPC_URLS=
 ONCHAIN_ASSET_REGISTRY=
 ONCHAIN_EXCHANGE_ADDRESSES=
+GMGN_ENABLED=false
+GMGN_API_KEY=
+GMGN_TIMEOUT_MS=8000
+ALCHEMY_ENABLED=false
+ALCHEMY_API_KEY=
+ALCHEMY_TIMEOUT_MS=8000
+ALCHEMY_NETWORKS=ethereum,base,arbitrum,bnb,polygon
+ALCHEMY_WEBHOOK_SIGNING_KEY=
 BINANCE_REF_CODE=
 BINANCE_REF_URL=
 HYPERLIQUID_REF_CODE=
