@@ -76,6 +76,7 @@ const { normalizeEvidence } = require("./evidence");
 const { getStreamManager } = require("./streamManager");
 const { collectAlchemyEvidence } = require("./alchemy");
 const { collectGmgnEvidence } = require("./gmgn");
+const { buildWalletEvidence } = require("../walletIntelligence");
 
 
 
@@ -2867,6 +2868,18 @@ registerProvider({
   cacheTtlMs: 60000,
   sourceConfidence: 0.78,
   collect: collectGmgnEvidence,
+});
+
+registerProvider({
+  id: "wallet_intelligence",
+  name: "PerpsIA Wallet Intelligence",
+  category: "onchain-wallet",
+  authentication: "SQLite registry + Alchemy/GMGN attribution",
+  rateLimit: "Local deterministic analysis",
+  transport: "SQLite",
+  cacheTtlMs: 15000,
+  sourceConfidence: 0.82,
+  collect: (context = {}) => buildWalletEvidence(context.symbol, context),
 });
 
 

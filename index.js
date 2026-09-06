@@ -305,6 +305,9 @@ const {
 } = require("./services/providers/publicProviders");
 const { getAlchemyHealth, recordAlchemyWebhook, verifyAlchemySignature } = require("./services/providers/alchemy");
 const { getGmgnHealth } = require("./services/providers/gmgn");
+const { getAlchemySyncHealth, startAlchemyWatchlistSync, stopAlchemyWatchlistSync } = require("./services/alchemySync");
+const { getRegistryHealth } = require("./services/walletRegistry");
+const { getWalletRefreshHealth, startWalletRefresh, stopWalletRefresh } = require("./services/walletRefresh");
 const { getOnchainStoreHealth } = require("./services/onchainStore");
 const { getStreamManager } = require("./services/providers/streamManager");
 const { getSnapshotHealth } = require("./services/providers/liveSnapshotStore");
@@ -494,6 +497,9 @@ async function handleHttpRequest(req, res) {
           storage: getOnchainStoreHealth(),
           alchemy: getAlchemyHealth(),
           gmgn: getGmgnHealth(),
+          walletRegistry: getRegistryHealth(),
+          alchemySync: getAlchemySyncHealth(),
+          walletRefresh: getWalletRefreshHealth(),
         },
         providers,
         realtime: {
@@ -648,6 +654,9 @@ async function handleHttpRequest(req, res) {
           storage: getOnchainStoreHealth(),
           alchemy: getAlchemyHealth(),
           gmgn: getGmgnHealth(),
+          walletRegistry: getRegistryHealth(),
+          alchemySync: getAlchemySyncHealth(),
+          walletRefresh: getWalletRefreshHealth(),
         },
         providers: {
           catalog: getProviderCatalog(),
@@ -5172,6 +5181,8 @@ void startTelegramPolling();
 
 const streamManager = getStreamManager();
 streamManager.start();
+startAlchemyWatchlistSync();
+startWalletRefresh();
 
 startScheduler({
   bot,
@@ -5241,6 +5252,8 @@ const healthServer = http
 function shutdown(signal) {
   structuredLog("info", "shutdown_started", { signal });
   streamManager.stop();
+  stopAlchemyWatchlistSync();
+  stopWalletRefresh();
   try { bot.stopPolling?.(); } catch (error) {
     structuredLog("warn", "telegram_polling_stop_failed", { message: error.message });
   }

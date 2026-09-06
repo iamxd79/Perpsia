@@ -23,6 +23,7 @@ const PROVIDER_GROUPS = {
   alchemy_webhook: ["ONCHAIN"],
   public_rpc: ["ONCHAIN"],
   gmgn: ["ONCHAIN"],
+  wallet_intelligence: ["ONCHAIN"],
 };
 
 const CEX_PROVIDERS = ["binance", "bybit", "okx", "hyperliquid"];
@@ -269,6 +270,8 @@ function routeProviders(symbol, options = {}) {
 
   if (process.env.ALCHEMY_ENABLED === "true") add("alchemy");
   if (process.env.GMGN_ENABLED === "true" && (hasContract || dexAsset || options.gmgnDiscovery)) add("gmgn");
+
+  add("wallet_intelligence");
 
   if (options.verifiedOfficialRepository && options.repository) add("github");
   return {

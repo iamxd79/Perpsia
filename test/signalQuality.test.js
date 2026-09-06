@@ -60,7 +60,7 @@ test("provider routing separates perpetual and DEX token workloads", () => {
     contractAddress: "0xabc",
     verifiedOfficialRepository: false,
   });
-  assert.deepEqual(dex.providers, ["dexscreener", "geckoterminal", "goplus", "honeypot"]);
+  assert.deepEqual(dex.providers, ["dexscreener", "geckoterminal", "goplus", "honeypot", "wallet_intelligence"]);
   assert.ok(!dex.providers.includes("github"));
 });
 

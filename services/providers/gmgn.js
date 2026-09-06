@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const axios = require("axios");
 const { CircuitBreaker, executeWithResilience } = require("../resilience");
 const { increment, observe } = require("../telemetry");
+const { importGmgnWallets } = require("../walletRegistry");
 
 const DEFAULT_HOST = "https://openapi.gmgn.ai";
 const CACHE_TTL_MS = 60000;
@@ -169,9 +170,21 @@ function compactWallet(item) {
     address: object.address || object.wallet_address || object.walletAddress || null,
     tag: object.tag || object.tags || null,
     pnl: object.pnl ?? object.realized_profit ?? object.profit_change ?? null,
+    realizedPnl: object.realized_pnl ?? object.realized_profit ?? object.pnl ?? null,
+    winRate: object.win_rate ?? object.winrate ?? null,
+    profitableTradeRatio: object.profitable_trade_ratio ?? object.profit_trade_ratio ?? null,
+    tradeCount: object.trade_count ?? object.tx_count ?? object.total_trades ?? null,
     buyVolume: object.buy_volume_cur ?? object.buy_volume_24h ?? null,
     sellVolume: object.sell_volume_cur ?? object.sell_volume_24h ?? null,
     lastActive: object.last_active_timestamp ?? object.last_active_time ?? null,
+    averageEntryTiming: object.average_entry_timing ?? object.avg_entry_timing ?? null,
+    earlyEntryFrequency: object.early_entry_frequency ?? object.early_entries_ratio ?? null,
+    rugExposure: object.rug_exposure ?? object.rug_ratio ?? null,
+    tokenDiversity: object.token_diversity ?? object.unique_tokens ?? null,
+    drawdown: object.drawdown ?? object.max_drawdown ?? null,
+    consistency: object.consistency ?? object.consistency_score ?? null,
+    dataFreshness: object.updated_at ?? object.last_active_timestamp ?? null,
+    publicIdentityReference: object.profile_url || object.profileUrl || null,
   };
 }
 
@@ -192,7 +205,7 @@ function securityRisk(security) {
   return hardRisk ? Math.min(100, 25 * hardRisk) : null;
 }
 
-function availableRecord(symbol, chain, address, responses, warnings) {
+function availableRecord(symbol, chain, address, responses, warnings, options = {}) {
   const info = asObject(responses.info);
   const security = asObject(responses.security);
   const pool = asObject(responses.pool);
@@ -207,7 +220,19 @@ function availableRecord(symbol, chain, address, responses, warnings) {
   const holderCount = firstNumber([info], ["holder_count", "holders", "holder_num"]);
   const timestamp = firstNumber([info, pool], ["updated_at", "update_time", "timestamp"]) || Date.now();
   const featureSources = Object.entries(responses).filter(([, value]) => value !== null && value !== undefined).map(([name]) => name);
-  const walletRows = [...smartHolders, ...smartTraders, ...smartMoneyFeed].slice(0, MAX_LIST_ITEMS).map(compactWallet);
+  const walletRows = [...smartHolders, ...smartTraders, ...smartMoneyFeed]
+    .map(compactWallet)
+    .filter((item, index, rows) => item.address && rows.findIndex((candidate) => candidate.address === item.address) === index)
+    .slice(0, MAX_LIST_ITEMS);
+  const gmgnImport = options.persistWallets === false ? { imported: [], rejected: [] } : importGmgnWallets(walletRows.map((wallet) => ({
+      ...wallet,
+      chain,
+      category: /kol|ct|influencer/i.test(String(wallet.tag || "")) ? "kol" : "smart_money",
+      sourceKey: "gmgn:smart-money:" + wallet.address,
+    payload: wallet,
+  })));
+  increment("gmgn_wallet_imports_total", { status: "imported" }, gmgnImport.imported.length);
+  if (gmgnImport.rejected.length) increment("gmgn_wallet_imports_total", { status: "rejected" }, gmgnImport.rejected.length);
   return {
     provider: "gmgn",
     symbol,
@@ -232,6 +257,8 @@ function availableRecord(symbol, chain, address, responses, warnings) {
       smartMoneyTraderCount: smartTraders.length,
       smartMoneyActivityCount: smartMoneyFeed.length,
       smartMoneyWallets: walletRows,
+      importedWalletCount: gmgnImport.imported.length,
+      rejectedWalletCount: gmgnImport.rejected.length,
       tokenName: info.name || info.token_name || info.symbol || null,
       tokenSymbol: info.symbol || null,
       security: {
@@ -279,7 +306,7 @@ async function collectGmgnEvidence(context = {}) {
   responses.smartMoney = await safeCall("smart_money", () => cachedRequest("GET", READ_ONLY_ENDPOINTS.smartMoney, { chain, limit: 20 }, null, context), warnings);
   const available = Object.values(responses).some((value) => value !== null);
   if (!available) return { provider: "gmgn", symbol, status: "unavailable", error: warnings.join("; ") || "GMGN returned no data.", metadata: { evidenceGroup: "ONCHAIN", readOnly: true, warnings } };
-  return availableRecord(symbol, chain, address, responses, warnings);
+  return availableRecord(symbol, chain, address, responses, warnings, context);
 }
 
 async function getGmgnTrending(chain, interval = "1h", options = {}) {
@@ -301,6 +328,35 @@ async function getGmgnWalletActivity(chain, walletAddress, options = {}) {
 async function getGmgnWalletStats(chain, walletAddresses, period = "7d", options = {}) {
   const wallets = Array.isArray(walletAddresses) ? walletAddresses : [walletAddresses];
   return cachedRequest("GET", READ_ONLY_ENDPOINTS.walletStats, { chain: normalizedChain(chain), wallet_address: wallets, period }, null, options);
+}
+
+async function refreshGmgnSmartMoney(options = {}) {
+  if (!isEnabled(options)) return { status: "disabled", imported: [], rejected: [], warnings: ["GMGN provider is disabled."] };
+  if (!apiKey(options)) return { status: "unavailable", imported: [], rejected: [], warnings: ["GMGN_API_KEY is not configured."] };
+  const chain = normalizedChain(options.chain || process.env.GMGN_DEFAULT_CHAIN || "sol");
+  const limit = Math.min(1000, Math.max(1, Number(options.limit || process.env.GMGN_SMART_MONEY_LIMIT || 100)));
+  const response = await cachedRequest("GET", READ_ONLY_ENDPOINTS.smartMoney, { chain, limit }, null, options);
+  const rows = asList(response);
+  const candidates = rows.map(compactWallet).filter((wallet) => wallet.address).filter((wallet) => {
+    const tag = JSON.stringify(wallet.tag || "");
+    const hasEvidence = [wallet.realizedPnl, wallet.winRate, wallet.profitableTradeRatio, wallet.tradeCount, wallet.earlyEntryFrequency].some((item) => item !== null && item !== undefined && item !== "");
+    return /smart|profitable|ranked/i.test(tag) && hasEvidence;
+  }).slice(0, limit);
+  const result = importGmgnWallets(candidates.map((wallet) => ({
+    ...wallet,
+    chain,
+    category: /kol|ct|influencer/i.test(String(wallet.tag || "")) ? "kol" : "smart_money",
+    sourceKey: "gmgn:smart-money-refresh:" + chain + ":" + wallet.address,
+    payload: wallet,
+  })));
+  return {
+    status: "refreshed",
+    chain,
+    limit,
+    discovered: rows.length,
+    qualified: candidates.length,
+    ...result,
+  };
 }
 
 function getGmgnHealth() {
@@ -328,5 +384,6 @@ module.exports = {
   getGmgnTrending,
   getGmgnWalletActivity,
   getGmgnWalletStats,
+  refreshGmgnSmartMoney,
   normalizedChain,
 };

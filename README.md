@@ -228,6 +228,9 @@ The default bounded scan uses CMC plus Binance, Bybit, OKX, Hyperliquid, DexScre
     ALCHEMY_TIMEOUT_MS=8000
     ALCHEMY_NETWORKS=ethereum,base,arbitrum,bnb,polygon
     ALCHEMY_WEBHOOK_SIGNING_KEY=
+    ALCHEMY_NOTIFY_AUTH_TOKEN=
+    ALCHEMY_WEBHOOK_URL=
+    ALCHEMY_SYNC_INTERVAL_MS=900000
     GMGN_ENABLED=false
     GMGN_API_KEY=
     GMGN_TIMEOUT_MS=8000
@@ -245,6 +248,28 @@ Supported configured EVM networks are Ethereum, Base, Arbitrum, Optimism, Polygo
 Configure the Alchemy Address Activity webhook to POST to `https://<your-render-service>/webhooks/alchemy`. The endpoint verifies the raw body with `X-Alchemy-Signature` and `ALCHEMY_WEBHOOK_SIGNING_KEY`, then inserts events into the existing persistent SQLite database with an idempotent event key. The signing key is copied from the webhook's detail page in the Alchemy Dashboard after the webhook is created. Webhook events are attributed as `alchemy_webhook` and are deduplicated against transfer polling before entering normalized ONCHAIN evidence.
 
 The `/health` response includes `onchain.storage`, `onchain.alchemy`, and the provider catalog. Prometheus `/metrics` includes Alchemy request latency, request status, event ingestion, and webhook duplicate counters. No Alchemy secret is sent to the frontend or written to logs.
+
+### Wallet and exchange intelligence
+
+PerpsIA stores one canonical watched-wallet registry in SQLite. It is the source of truth for manually approved CT/KOL wallets, GMGN-classified Smart Money wallets, and verified exchange clusters. Raw transfers remain in the existing `onchain_events` table; registry-linked relationships are stored separately so Alchemy and GMGN observations are not counted as independent directional confirmations.
+
+Wallet evidence is deterministic and remains inside `ONCHAIN`. It reports Smart Money/KOL net flow, verified exchange inflow/outflow, wallet convergence, repeated buys/sells, unique tracked participants, accumulation/distribution, flow acceleration across 15m/1h/4h/24h windows, and new-token exposure. Wallet evidence never creates LONG or SHORT direction by itself.
+
+Exchange activity produces `LISTING_WATCH` records only. A possible listing is never shown as confirmed unless an explicit official exchange source is supplied. The health response includes `onchain.walletRegistry` and `onchain.alchemySync`; Prometheus exposes registry, wallet-event, convergence, exchange-flow, listing-watch, GMGN-import, and Alchemy watchlist-sync metrics.
+
+Automatic Alchemy Address Activity synchronization is optional. When `ALCHEMY_NOTIFY_AUTH_TOKEN` and `ALCHEMY_WEBHOOK_URL` (or `RENDER_EXTERNAL_URL`) are configured, PerpsIA manages one Address Activity webhook per configured EVM network, only when the webhook URL matches its own callback. It adds enabled canonical addresses and removes disabled addresses from those PerpsIA-managed webhooks; unrelated Alchemy webhooks are not modified. Without the Notify token, the raw webhook endpoint continues to work but the remaining dashboard synchronization step is reported in `/health`.
+
+The internal `services/walletAdmin.js` utility exposes guarded application-level operations for adding, disabling, enabling, relabeling, approving, importing, listing, and inspecting wallets, triggering Alchemy sync, and reading listing-watch events. It is intentionally not exposed as a public HTTP admin API without authentication.
+
+### Bulk wallet watchlist administration
+
+The local/server-side CLI is `npm run wallet-admin -- <command>`. It supports `import-gmgn`, `import-gmgn-smart-money`, `import-exchange`/`import-exchange-dataset`, `import-kol`, `import-funds`, `verify-pending`, `approve`, `list`, `disable`, `enable`, `refresh-wallets`, `alchemy-sync`, `alchemy-status`, and `history`. JSON imports accept either an array or an object containing `wallets`/`records`. The empty templates in `templates/verified-exchanges.json`, `templates/verified-kols.json`, and `templates/verified-funds.json` contain no invented addresses.
+
+Bulk ingestion normalizes `chain + address`, rejects malformed addresses and invalid provenance, deduplicates within a batch, records source provenance, and preserves stronger existing verification and manually approved identity metadata. Pending exchange/curated records are stored disabled until reviewed; rejected records are never enabled. The CLI's `verify-pending` command is review-only, while `approve --id <id>` performs an explicit manual approval.
+
+GMGN Smart Money quality is deterministic. The weighted score uses observed realized P&L, win rate, profitable-trade ratio, trade count, recent activity, entry timing, early-entry frequency, rug exposure, token diversity, drawdown, consistency, and data freshness. Unobserved fields are excluded rather than fabricated. Default tiers are LOW (<40), WATCH (40-59), QUALITY (60-74), HIGH_QUALITY (75-89), and ELITE (90+); thresholds can be configured with the `PERPSIA_WALLET_QUALITY_*` variables.
+
+Alchemy synchronization selects only enabled, eligible EVM wallets, sorts by monitoring priority, and applies `PERPSIA_WALLET_MIN_SYNC_PRIORITY` and `PERPSIA_MAX_ALCHEMY_WATCHED_ADDRESSES`. Verified exchange deposit/aggregation/hot wallets receive priority 100; ELITE and HIGH_QUALITY Smart Money receive 90 and 80; verified KOL and fund categories receive their configured lower tiers. Solana wallets remain in the canonical registry but are not sent to the current Alchemy EVM Address Activity synchronizer.
 
 ### GMGN read-only intelligence
 
@@ -704,6 +729,9 @@ ALCHEMY_API_KEY=
 ALCHEMY_TIMEOUT_MS=8000
 ALCHEMY_NETWORKS=ethereum,base,arbitrum,bnb,polygon
 ALCHEMY_WEBHOOK_SIGNING_KEY=
+ALCHEMY_NOTIFY_AUTH_TOKEN=
+ALCHEMY_WEBHOOK_URL=
+ALCHEMY_SYNC_INTERVAL_MS=900000
 BINANCE_REF_CODE=
 BINANCE_REF_URL=
 HYPERLIQUID_REF_CODE=

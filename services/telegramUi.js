@@ -261,6 +261,12 @@ function lifecycleLabel(signal, lifecycle) {
     .replace(/[^A-Z0-9 /_-]/g, "");
 }
 
+function walletIntelligenceSnapshot(signal = {}) {
+  const record = (Array.isArray(signal.marketEvidence) ? signal.marketEvidence : [])
+    .find((item) => String(item?.provider || "").toLowerCase() === "wallet_intelligence" && item.status === "ok");
+  return record?.metadata || null;
+}
+
 function formatSignalCard(signal = {}, options = {}) {
   const symbol = cleanText(signal.symbol, "ASSET").toUpperCase();
   const direction = cleanText(signal.direction || signal.category, "SETUP").toUpperCase();
@@ -296,6 +302,22 @@ function formatSignalCard(signal = {}, options = {}) {
     ...(signal.conflicts || []),
   ], 2);
   if (risks.length) lines.push("", "Risk", ...risks.map((risk) => "- " + risk));
+
+  const wallet = walletIntelligenceSnapshot(signal);
+  if (wallet) {
+    const latest = wallet.windows?.["24h"] || {};
+    const walletLines = [
+      latest.smartMoneyNetFlow !== null && latest.smartMoneyNetFlow !== undefined ? "Smart Money net flow  " + formatNumber(latest.smartMoneyNetFlow, 2) : null,
+      latest.walletConvergence ? "Wallet convergence   " + formatNumber(latest.walletConvergence, 0) + " wallets" : null,
+      latest.exchangeInflow ? "Exchange inflow       " + formatMoney(latest.exchangeInflow) : null,
+      latest.exchangeOutflow ? "Exchange outflow      " + formatMoney(latest.exchangeOutflow) : null,
+    ].filter(Boolean);
+    if (walletLines.length) lines.push("", "Wallet intelligence", ...walletLines);
+    const watches = Array.isArray(wallet.listingWatch) ? wallet.listingWatch : [];
+    for (const watch of watches.slice(0, 2)) {
+      lines.push("", "Listing watch", watch.exchange + " — " + watch.level, ...((watch.observations || []).slice(0, 2).map((item) => "+ " + cleanText(item))));
+    }
+  }
 
   const changeItems = compactReasons(options.memory?.changes, 2);
   if (changeItems.length) lines.push("", "Changed since last scan", ...changeItems.map((item) => "- " + item));
@@ -348,6 +370,10 @@ function formatAlphaCard(signal = {}, options = {}) {
   for (const [label, value] of facts) lines.push(label.padEnd(13) + value);
   const reasons = compactReasons(signal.reasons, 3);
   if (reasons.length) lines.push("", "Why it stands out", ...reasons.map((reason) => "- " + reason));
+  const wallet = walletIntelligenceSnapshot(signal);
+  if (wallet?.listingWatch?.length) {
+    lines.push("", "Listing watch", ...wallet.listingWatch.slice(0, 2).map((watch) => watch.exchange + " — " + watch.level));
+  }
   return lines.join("\n").trim();
 }
 

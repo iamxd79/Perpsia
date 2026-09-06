@@ -1,0 +1,4 @@
+{
+  "_instructions": "Add only publicly documented exchange addresses. Every wallet needs address, chain, exchange, role, verificationStatus, and a valid official or trusted sourceUrl.",
+  "wallets": []
+}

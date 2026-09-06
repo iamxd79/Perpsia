@@ -38,6 +38,7 @@ test("GMGN normalizes read-only token intelligence and never calls trading route
       gmgnChain: "sol",
       contractAddress: "token-1",
       timeoutMs: 1000,
+      persistWallets: false,
     });
     assert.equal(result.status, "ok");
     assert.equal(result.provider, "gmgn");

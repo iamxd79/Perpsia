@@ -56,6 +56,70 @@ const counterDefinitions = {
     help: "Duplicate on-chain webhook events ignored",
     labels: ["provider"],
   },
+  wallet_registry_total: {
+    help: "Wallet registry operations",
+    labels: ["operation", "status"],
+  },
+  wallet_events_total: {
+    help: "Canonical wallet-linked on-chain events",
+    labels: ["status"],
+  },
+  wallet_convergence_events_total: {
+    help: "Wallet convergence observations",
+    labels: ["symbol"],
+  },
+  smart_money_events_total: {
+    help: "Smart Money observations",
+    labels: ["symbol"],
+  },
+  exchange_flow_events_total: {
+    help: "Exchange flow observations",
+    labels: ["symbol"],
+  },
+  listing_watch_events_total: {
+    help: "Listing watch observations",
+    labels: ["level", "type"],
+  },
+  gmgn_wallet_imports_total: {
+    help: "GMGN wallet imports",
+    labels: ["status"],
+  },
+  alchemy_watchlist_sync_total: {
+    help: "Alchemy watchlist synchronization operations",
+    labels: ["operation", "status"],
+  },
+  alchemy_watchlist_sync_errors_total: {
+    help: "Alchemy watchlist synchronization errors",
+    labels: ["operation"],
+  },
+  wallet_watchlist_total: {
+    help: "Wallet watchlist observations",
+    labels: ["category", "chain"],
+  },
+  wallet_quality_tier_total: {
+    help: "Wallets by deterministic quality tier",
+    labels: ["tier"],
+  },
+  wallet_imports_total: {
+    help: "Wallet watchlist imports and refreshes",
+    labels: ["source", "status"],
+  },
+  wallet_import_rejections_total: {
+    help: "Rejected wallet watchlist records",
+    labels: ["source", "reason"],
+  },
+  wallet_priority_total: {
+    help: "Wallets by monitoring priority",
+    labels: ["priority"],
+  },
+  smart_money_high_quality_total: {
+    help: "High-quality Smart Money wallets",
+    labels: ["tier"],
+  },
+  exchange_wallets_verified_total: {
+    help: "Verified exchange wallets",
+    labels: ["exchange", "role"],
+  },
 };
 
 const histogramDefinitions = {
@@ -88,6 +152,7 @@ const gauges = new Map([
   ["perpsia_open_signals", 0],
   ["perpsia_websocket_connections_active", 0],
   ["perpsia_live_snapshots_usable", 0],
+  ["alchemy_watched_addresses", 0],
 ]);
 
 function labelsKey(labels) {
