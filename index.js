@@ -507,7 +507,7 @@ async function handleHttpRequest(req, res) {
       const snapshots = getSnapshotHealth();
       const degraded = providers.some((item) => ["circuit_open", "offline", "degraded"].includes(String(item.status || "").toLowerCase())) ||
         streamHealth.some((item) => ["degraded", "stale"].includes(String(item.status || "").toLowerCase())) ||
-        snapshots.some((item) => item.stale === true);
+        Number(snapshots.stale || 0) > 0;
       const noProviderAvailable = providers.length > 0 && providers.every((item) => ["circuit_open", "offline"].includes(String(item.status || "").toLowerCase()));
       res.writeHead(noProviderAvailable ? 503 : 200, {
         "Content-Type": "application/json; charset=utf-8",
