@@ -1200,6 +1200,37 @@ function evidenceStatus(price, availableCount) {
 
 
 
+const BINANCE_DISCOVERY_TTL_MS = 60 * 1000;
+let binanceDiscoveryCache = { expiresAt: 0, symbols: [] };
+
+async function discoverBinancePerpetualSymbols(options = {}) {
+  const limit = Math.min(100, Math.max(1, Number(options.limit || 54)));
+  const now = Date.now();
+  if (binanceDiscoveryCache.expiresAt > now && binanceDiscoveryCache.symbols.length) {
+    return binanceDiscoveryCache.symbols.slice(0, limit);
+  }
+
+  const rows = await getJson(BINANCE_FUTURES + "/fapi/v1/ticker/24hr", options);
+  const excludedBases = new Set(["USDC", "USDT", "BUSD", "FDUSD", "DAI", "TUSD"]);
+  const ranked = (Array.isArray(rows) ? rows : [])
+    .filter((item) => String(item?.symbol || "").endsWith("USDT"))
+    .map((item) => ({
+      symbol: String(item.symbol).slice(0, -4),
+      quoteVolume: Number(item.quoteVolume) || 0,
+      priceChange: Number(item.priceChangePercent) || 0,
+      trades: Number(item.count) || 0,
+    }))
+    .filter((item) => item.symbol && !excludedBases.has(item.symbol))
+    .sort((left, right) => {
+      const leftScore = Math.log10(1 + left.quoteVolume) * 0.65 + Math.min(25, Math.abs(left.priceChange)) * 0.25 + Math.log10(1 + left.trades) * 0.1;
+      const rightScore = Math.log10(1 + right.quoteVolume) * 0.65 + Math.min(25, Math.abs(right.priceChange)) * 0.25 + Math.log10(1 + right.trades) * 0.1;
+      return rightScore - leftScore;
+    })
+    .map((item) => item.symbol);
+
+  binanceDiscoveryCache = { expiresAt: now + BINANCE_DISCOVERY_TTL_MS, symbols: ranked };
+  return ranked.slice(0, limit);
+}
 async function fetchBinance(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
   const pair = asUsdtSymbol(asset);
@@ -3678,6 +3709,7 @@ async function collectMarketEvidence(symbol, options = {}) {
 
 module.exports = {
   collectMarketEvidence,
+  discoverBinancePerpetualSymbols,
   fetchAlternative,
   fetchBinance,
   fetchBybit,
