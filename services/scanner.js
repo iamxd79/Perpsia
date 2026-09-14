@@ -2,7 +2,7 @@ const { executeSkill } = require("./cmcClient");
 
 const ACTIVE_SIGNAL_SCORE = 70;
 const WATCHLIST_SCORE = 40;
-const MAX_SCAN_CANDIDATES = 8;
+const MAX_SCAN_CANDIDATES = Math.min(100, Math.max(1, Number(process.env.PERPSIA_MAX_SCAN_CANDIDATES || 54)));
 
 function normalizeSymbol(symbol) {
   return String(symbol || "")
