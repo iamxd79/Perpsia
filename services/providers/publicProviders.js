@@ -1202,6 +1202,7 @@ function evidenceStatus(price, availableCount) {
 
 const BINANCE_DISCOVERY_TTL_MS = 60 * 1000;
 let binanceDiscoveryCache = { expiresAt: 0, symbols: [] };
+let bybitDiscoveryCache = { expiresAt: 0, symbols: [] };
 
 async function discoverBinancePerpetualSymbols(options = {}) {
   const limit = Math.min(100, Math.max(1, Number(options.limit || 54)));
@@ -1231,6 +1232,39 @@ async function discoverBinancePerpetualSymbols(options = {}) {
   binanceDiscoveryCache = { expiresAt: now + BINANCE_DISCOVERY_TTL_MS, symbols: ranked };
   return ranked.slice(0, limit);
 }
+
+async function discoverBybitPerpetualSymbols(options = {}) {
+  const limit = Math.min(100, Math.max(1, Number(options.limit || 54)));
+  const now = Date.now();
+  if (bybitDiscoveryCache.expiresAt > now && bybitDiscoveryCache.symbols.length) {
+    return bybitDiscoveryCache.symbols.slice(0, limit);
+  }
+  const payload = await getJson(BYBIT + "/v5/market/tickers", {
+    ...options,
+    params: { category: "linear" },
+  });
+  if (payload?.retCode !== undefined && Number(payload.retCode) !== 0) {
+    throw new Error(payload.retMsg || "Bybit market discovery failed");
+  }
+  const excludedBases = new Set(["USDC", "USDT", "BUSD", "FDUSD", "DAI", "TUSD"]);
+  const ranked = (Array.isArray(payload?.result?.list) ? payload.result.list : [])
+    .filter((item) => String(item?.symbol || "").endsWith("USDT"))
+    .map((item) => ({
+      symbol: String(item.symbol).slice(0, -4),
+      turnover: Number(item.turnover24h) || 0,
+      priceChange: Number(item.price24hPcnt) * 100 || 0,
+    }))
+    .filter((item) => item.symbol && !excludedBases.has(item.symbol))
+    .sort((left, right) => {
+      const leftScore = Math.log10(1 + left.turnover) * 0.75 + Math.min(25, Math.abs(left.priceChange)) * 0.25;
+      const rightScore = Math.log10(1 + right.turnover) * 0.75 + Math.min(25, Math.abs(right.priceChange)) * 0.25;
+      return rightScore - leftScore;
+    })
+    .map((item) => item.symbol);
+  bybitDiscoveryCache = { expiresAt: now + BINANCE_DISCOVERY_TTL_MS, symbols: ranked };
+  return ranked.slice(0, limit);
+}
+
 async function fetchBinance(symbol, options = {}) {
   const asset = normalizeAssetSymbol(symbol);
   const pair = asUsdtSymbol(asset);
@@ -3710,6 +3744,7 @@ async function collectMarketEvidence(symbol, options = {}) {
 module.exports = {
   collectMarketEvidence,
   discoverBinancePerpetualSymbols,
+  discoverBybitPerpetualSymbols,
   fetchAlternative,
   fetchBinance,
   fetchBybit,

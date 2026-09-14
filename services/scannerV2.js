@@ -24,7 +24,7 @@ const { analyzeDivergence } = require("./divergence");
 const { checkWhaleActivity } = require("./whaleAlerts");
 const { analyzeCorrelation } = require("./correlation");
 const { RequestQueue } = require("./queue");
-const { collectMarketEvidence, discoverBinancePerpetualSymbols } = require("./providers/publicProviders");
+const { collectMarketEvidence, discoverBinancePerpetualSymbols, discoverBybitPerpetualSymbols } = require("./providers/publicProviders");
 const { buildCrossSourceSignals } = require("./providers/crossSource");
 const { routeProviders, calculateSignalConfidence } = require("./signalQuality");
 const { analyzeTechnicalContext } = require("./technicalAnalysis");
@@ -3564,7 +3564,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
   }
 
   let symbols = primarySymbols;
-  let usedBinanceFallback = false;
+  let usedMarketDiscoveryFallback = false;
   if (symbols.length < MAX_SCAN_CANDIDATES) {
     try {
       const fallbackSymbols = await discoverBinancePerpetualSymbols({
@@ -3572,9 +3572,21 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
         timeoutMs: options.discoveryTimeoutMs || 8000,
       });
       symbols = [...new Set([...symbols, ...fallbackSymbols])].slice(0, MAX_SCAN_CANDIDATES);
-      usedBinanceFallback = symbols.length > primarySymbols.length;
+      usedMarketDiscoveryFallback = symbols.length > primarySymbols.length;
     } catch (error) {
       console.warn("Binance market discovery fallback unavailable:", error.message);
+      try {
+        const fallbackSymbols = await discoverBybitPerpetualSymbols({
+          limit: MAX_SCAN_CANDIDATES,
+          timeoutMs: options.discoveryTimeoutMs || 8000,
+        });
+        symbols = [...new Set([...symbols, ...fallbackSymbols])].slice(0, MAX_SCAN_CANDIDATES);
+        usedMarketDiscoveryFallback = symbols.length > primarySymbols.length;
+        console.warn("Bybit market discovery fallback used:", symbols.length);
+      } catch (bybitError) {
+        console.warn("Bybit market discovery fallback unavailable:", bybitError.message);
+      }
+
     }
   }
 
@@ -3592,6 +3604,8 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
+
+  console.info(JSON.stringify({ event: "market_discovery", primaryCandidates: primarySymbols.length, finalCandidates: symbols.length, maximumCandidates: MAX_SCAN_CANDIDATES, fallbackUsed: usedMarketDiscoveryFallback }));
 
   if (!symbols.length) {
     console.error(
@@ -3635,10 +3649,10 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
   await onProgress({
     percent: 25,
     stage: "Candidate Detection",
-    message: usedBinanceFallback
+    message: usedMarketDiscoveryFallback
       ? primaryDiscoveryError
-        ? `✅ ${symbols.length} candidates detected (Binance fallback).`
-        : `✅ ${symbols.length} candidates detected (CMC + Binance discovery).`
+        ? `✅ ${symbols.length} candidates detected (market fallback).`
+        : `✅ ${symbols.length} candidates detected (CMC + market discovery).`
       : `✅ ${symbols.length} candidates detected.`,
   });
 
