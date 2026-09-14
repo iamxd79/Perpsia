@@ -67,3 +67,26 @@ test("preserves normalized provider records returned in an evidence envelope", (
   });
   assert.deepEqual(signal.marketEvidence, marketEvidence);
 });
+
+
+test("extracts symbols from the CMC ranked candidate queue heading", () => {
+  const payload = {
+    result: {
+      data: {
+        data: {
+          decision_report: {
+            analysis: [
+              "## Ranked Candidate Queue",
+              "1.  **CAP (Squeeze tier):** review the setup.",
+              "2.  **SOXL (Crowded chop tier):** review the setup.",
+              "3.  **RBLX (Watch tier):** review the setup.",
+              "## Secondary Candidates",
+              "1.  **BR:** follow up.",
+            ].join(String.fromCharCode(10)),
+          },
+        },
+      },
+    },
+  };
+  assert.deepEqual(extractSymbolsFromScan(payload), ["CAP", "SOXL", "RBLX"]);
+});

@@ -1650,7 +1650,8 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
       lower.includes("ranked primary candidates") ||
       lower.includes("ranked candidates") ||
       lower.includes("ranked primary candidate") ||
-      lower.includes("primary candidate queue")
+      lower.includes("primary candidate queue") ||
+      lower.includes("ranked candidate queue")
     ) {
       inPrimarySection = true;
       tableHeaders = null;
@@ -1672,7 +1673,7 @@ function extractSymbolsFromDecisionReport(scanPayload, blacklist) {
 
 
 
-    if (inPrimarySection && line.startsWith("###")) {
+    if (inPrimarySection && line.startsWith("#")) {
       inPrimarySection = false;
       tableHeaders = null;
       continue;
