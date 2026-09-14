@@ -3596,7 +3596,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
   if (!symbols.length) {
     console.error(
       "No symbols extracted from altcoin_scanner_perp output:",
-      JSON.stringify(scanPayload, null, 2)
+      JSON.stringify(rawScan, null, 2)
     );
 
 
