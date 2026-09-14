@@ -65,5 +65,6 @@ module.exports = {
   lockScan,
   unlockScan,
   lockTelegramPolling,
+  refreshTelegramPollingLock,
   unlockTelegramPolling,
 };
