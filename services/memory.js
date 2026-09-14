@@ -387,7 +387,46 @@ function saveUserPreferences(chatId, updates = {}) {
 }
 
 
+function getActiveSignals(limit = 200) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 200, 1), 500);
+  const rows = db.prepare(`
+    SELECT id, symbol, lifecycle_stage, raw_json, created_at
+    FROM asset_states
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(safeLimit * 3);
+  const seenSymbols = new Set();
+  const activeStages = new Set(["OPEN", "ACTIVE", "CONFIRMED", "BUILDING", "DISCOVERED"]);
+  const results = [];
+
+  for (const row of rows) {
+    const symbol = String(row.symbol || "").toUpperCase();
+    if (!symbol || seenSymbols.has(symbol)) continue;
+    let signal;
+    try {
+      signal = JSON.parse(row.raw_json || "{}");
+    } catch {
+      continue;
+    }
+    const lifecycle = String(signal.lifecycleState || signal.lifecycle_stage || signal.lifecycleStage || row.lifecycle_stage || "").toUpperCase();
+    if (!signal.isActionable || !activeStages.has(lifecycle)) continue;
+    seenSymbols.add(symbol);
+    const createdAtMs = Date.parse(String(row.created_at || "").replace(" ", "T") + "Z");
+    results.push({
+      ...signal,
+      id: signal.id || `asset-state-${row.id}`,
+      symbol,
+      lifecycleState: lifecycle,
+      updatedAt: signal.updatedAt || (Number.isFinite(createdAtMs) ? new Date(createdAtMs).toISOString() : null),
+    });
+    if (results.length >= safeLimit) break;
+  }
+
+  return results;
+}
+
 // ==========================================
+
 // STATS
 // ==========================================
 
@@ -431,5 +470,6 @@ module.exports = {
   getUserPreferences,
   saveUserPreferences,
   getMemoryStats,
+  getActiveSignals,
   getStorageInfo,
 };

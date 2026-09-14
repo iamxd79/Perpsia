@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 require("dotenv").config();
 
 
@@ -146,6 +147,7 @@ const {
   removeFromWatchlist,
   getUserPreferences,
   saveUserPreferences,
+  getActiveSignals,
 } = require("./services/memory");
 
 
@@ -245,6 +247,7 @@ const {
 
 const {
   startScheduler,
+  stopScheduler,
 } = require("./services/scheduler");
 
 
@@ -265,6 +268,9 @@ const {
 const {
   lockScan,
   unlockScan,
+  lockTelegramPolling,
+  refreshTelegramPollingLock,
+  unlockTelegramPolling,
 } = require("./services/scanLock");
 
 
@@ -440,6 +446,23 @@ function readRequestBody(req, maxBytes = 5 * 1024 * 1024) {
   });
 }
 
+function authorizeInternalRequest(req, res) {
+  const expected = String(process.env.PERPSIA_INTERNAL_API_TOKEN || "");
+  if (!expected) {
+    res.writeHead(503, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ error: "Internal endpoint is not configured." }));
+    return false;
+  }
+  const authorization = String(req.headers.authorization || "");
+  const provided = authorization.replace(/^Bearer\s+/i, "") || String(req.headers["x-perpsia-internal-token"] || "");
+  const matches = provided.length === expected.length && crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+  if (!matches) {
+    res.writeHead(401, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ error: "Unauthorized" }));
+    return false;
+  }
+  return true;
+}
 async function handleHttpRequest(req, res) {
   const requestUrl = new URL(req.url || "/", "http://perpsia.local");
 
@@ -482,9 +505,11 @@ async function handleHttpRequest(req, res) {
       const providers = getProviderHealth();
       const streamHealth = getStreamManager().getHealth();
       const snapshots = getSnapshotHealth();
-      const degraded = providers.some((item) => ["circuit_open", "offline"].includes(String(item.status || "").toLowerCase())) ||
-        streamHealth.some((item) => ["degraded", "stale"].includes(String(item.status || "").toLowerCase()));
-      res.writeHead(degraded ? 503 : 200, {
+      const degraded = providers.some((item) => ["circuit_open", "offline", "degraded"].includes(String(item.status || "").toLowerCase())) ||
+        streamHealth.some((item) => ["degraded", "stale"].includes(String(item.status || "").toLowerCase())) ||
+        snapshots.some((item) => item.stale === true);
+      const noProviderAvailable = providers.length > 0 && providers.every((item) => ["circuit_open", "offline"].includes(String(item.status || "").toLowerCase()));
+      res.writeHead(noProviderAvailable ? 503 : 200, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store",
       });
@@ -511,6 +536,7 @@ async function handleHttpRequest(req, res) {
     }
 
     if (requestUrl.pathname === "/metrics") {
+      if (!authorizeInternalRequest(req, res)) return;
       res.writeHead(200, {
         "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
         "Cache-Control": "no-store",
@@ -526,7 +552,32 @@ async function handleHttpRequest(req, res) {
 
 
 
+    if (requestUrl.pathname === "/api/signals") {
+      const rawDays = Number(requestUrl.searchParams.get("days") || 2);
+      const days = Number.isFinite(rawDays) ? Math.min(Math.max(rawDays, 1), 30) : 2;
+      const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+      const signals = getActiveSignals(200).filter((signal) => {
+        const timestamp = Date.parse(signal.updatedAt || "");
+        return !Number.isFinite(timestamp) || timestamp >= cutoff;
+      });
+      const timestamps = signals.map((signal) => Date.parse(signal.updatedAt || "")).filter(Number.isFinite);
+      const updatedAt = timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null;
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "public, max-age=15, s-maxage=15, stale-while-revalidate=30",
+      });
+      res.end(JSON.stringify({
+        signals,
+        meta: {
+          source: "active-signals",
+          updatedAt,
+          stale: updatedAt ? Date.now() - Date.parse(updatedAt) > 6 * 60 * 60 * 1000 : false,
+        },
+      }));
+      return;
+    }
     if (requestUrl.pathname === "/api/signal-quality" || requestUrl.pathname === "/api/performance/quality") {
+      if (!authorizeInternalRequest(req, res)) return;
       const rawDays = Number(requestUrl.searchParams.get("days") || 365);
       const rawHorizon = requestUrl.searchParams.get("horizon") || "24h";
       const rawSettle = requestUrl.searchParams.get("settle");
@@ -543,7 +594,7 @@ async function handleHttpRequest(req, res) {
       res.writeHead(200, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store",
-        "Access-Control-Allow-Origin": process.env.PERFORMANCE_CORS_ORIGIN || "*",
+        "Access-Control-Allow-Origin": process.env.PERFORMANCE_CORS_ORIGIN || "https://perpsia.app",
       });
       res.end(JSON.stringify({ ...payload, evaluation }));
       return;
@@ -560,7 +611,7 @@ async function handleHttpRequest(req, res) {
       res.writeHead(200, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store",
-        "Access-Control-Allow-Origin": process.env.PERFORMANCE_CORS_ORIGIN || "*",
+        "Access-Control-Allow-Origin": process.env.PERFORMANCE_CORS_ORIGIN || "https://perpsia.app",
       });
       res.end(JSON.stringify(payload));
       return;
@@ -574,6 +625,7 @@ async function handleHttpRequest(req, res) {
 
 
     if (requestUrl.pathname === "/api/performance/trades") {
+      if (!authorizeInternalRequest(req, res)) return;
       const rawDays = Number(requestUrl.searchParams.get("days") || 30);
       const rows = getPerformanceRows({
         lookbackDays: Number.isFinite(rawDays) ? rawDays : 30,
@@ -581,7 +633,7 @@ async function handleHttpRequest(req, res) {
       res.writeHead(200, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store",
-        "Access-Control-Allow-Origin": process.env.PERFORMANCE_CORS_ORIGIN || "*",
+        "Access-Control-Allow-Origin": process.env.PERFORMANCE_CORS_ORIGIN || "https://perpsia.app",
       });
       res.end(JSON.stringify({ trades: rows }));
       return;
@@ -639,6 +691,7 @@ async function handleHttpRequest(req, res) {
           "public-websocket-streams",
         ],
         endpoints: {
+          active_signals: "/api/signals",
           performance: "/api/performance",
           dashboard: "/performance",
           metrics: "/metrics",
@@ -814,6 +867,8 @@ let pollingRetryTimer = null;
 let pollingRetryAttempt = 0;
 let pollingRestarting = false;
 let commandsRegistered = false;
+let telegramLockHeld = false;
+let telegramLockRenewalTimer = null;
 
 
 
@@ -844,12 +899,33 @@ function scheduleTelegramPollingRetry() {
 
 
 
+function startTelegramLockRenewal() {
+  if (telegramLockRenewalTimer) return;
+  telegramLockRenewalTimer = setInterval(() => {
+    if (!refreshTelegramPollingLock()) {
+      console.error("Telegram polling lock could not be renewed.");
+    }
+  }, 30000);
+  telegramLockRenewalTimer.unref?.();
+}
+
+function releaseTelegramPollingLock() {
+  if (telegramLockRenewalTimer) {
+    clearInterval(telegramLockRenewalTimer);
+    telegramLockRenewalTimer = null;
+  }
+    releaseTelegramPollingLock();
+}
+
 async function startTelegramPolling() {
   if (pollingRestarting) return;
+  if (!lockTelegramPolling()) {
+    console.error("Telegram polling not started: another process owns the bot token.");
+    scheduleTelegramPollingRetry();
+    return;
+  }
+  telegramLockHeld = true;
   pollingRestarting = true;
-
-
-
 
   try {
     if (!commandsRegistered) {
@@ -862,9 +938,11 @@ async function startTelegramPolling() {
       }
     }
     await bot.startPolling();
+    startTelegramLockRenewal();
     pollingRetryAttempt = 0;
     console.log("Telegram polling started.");
   } catch (error) {
+    releaseTelegramPollingLock();
     if (isTelegramPollingConflict(error)) {
       scheduleTelegramPollingRetry();
     } else {
@@ -877,14 +955,13 @@ async function startTelegramPolling() {
 }
 
 
-
-
 bot.on("polling_error", (error) => {
   if (isTelegramPollingConflict(error)) {
     console.error(
       "Telegram polling conflict: another process currently owns this bot token."
     );
     void bot.stopPolling().catch(() => {});
+    releaseTelegramPollingLock();
     scheduleTelegramPollingRetry();
     return;
   }
@@ -5252,6 +5329,8 @@ const healthServer = http
 function shutdown(signal) {
   structuredLog("info", "shutdown_started", { signal });
   streamManager.stop();
+  stopScheduler();
+  releaseTelegramPollingLock();
   stopAlchemyWatchlistSync();
   stopWalletRefresh();
   try { bot.stopPolling?.(); } catch (error) {

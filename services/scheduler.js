@@ -289,36 +289,42 @@ ${error.message}`
 
 
 
+let schedulerTimer = null;
+
+function stopScheduler() {
+  if (!schedulerTimer) return false;
+  clearInterval(schedulerTimer);
+  schedulerTimer = null;
+  return true;
+}
+
 function startScheduler({ bot, chatId, intervalMs = 4 * 60 * 60 * 1000, venue }) {
   if (!bot) {
     throw new Error("Scheduler requires bot instance.");
   }
 
-
-
-
   if (!chatId) {
     console.log("Scheduler not started: TELEGRAM_CHAT_ID missing.");
-    return;
+    return { started: false, reason: "missing_chat_id" };
   }
 
-
-
+  if (schedulerTimer) {
+    console.log("Scheduler already started in this process.");
+    return { started: false, reason: "already_started", stop: stopScheduler };
+  }
 
   console.log(`Perpsia smart alert scheduler started. Interval: ${intervalMs}ms`);
-
-
-
-
-  setInterval(() => {
-    runScheduledScan({ bot, chatId, venue });
+  schedulerTimer = setInterval(() => {
+    void runScheduledScan({ bot, chatId, venue }).catch((error) => {
+      console.error("Scheduled scan runner failed:", error.message);
+    });
   }, intervalMs);
+  schedulerTimer.unref?.();
+  return { started: true, stop: stopScheduler };
 }
-
-
-
 
 module.exports = {
   startScheduler,
+  stopScheduler,
   runScheduledScan,
 };

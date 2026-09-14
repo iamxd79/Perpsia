@@ -261,51 +261,6 @@ function parseToolResult(result) {
   if (providerError) {
     throw new Error("CMC Skill Hub error: " + formatProviderError(providerError));
   }
-
-
-
-
-
-
-
-
-  console.log("\\n=== CMC RESPONSE DEBUG ===");
-  console.log("Full response structure keys:", Object.keys(parsed || {}));
-
-
-
-
-
-
-
-
-  if (parsed?.result?.data) {
-    console.log("Result.data keys:", Object.keys(parsed.result.data));
-    console.log(
-      "Decision report preview:",
-      JSON.stringify(parsed.result.data.decision_report || {}).slice(0, 300)
-    );
-  }
-
-
-
-
-
-
-
-
-  if (parsed?.output) {
-    console.log("Output preview:", String(parsed.output).slice(0, 300));
-  }
-
-
-
-
-
-
-
-
-  console.log("=== END DEBUG ===\\n");
   return parsed;
 }
 
@@ -2279,11 +2234,6 @@ ${mtfText}
 
 
 
-  console.log(`\n🔍 DEBUG: Classifying $${symbol}`);
-  console.log("Accumulation text length:", accumulationText.length);
-  console.log("Perp text length:", perpText.length);
-  console.log("Combined text length:", allText.length);
-  console.log("Combined text preview:", allText.slice(0, 300));
 
 
 
@@ -2307,54 +2257,6 @@ ${mtfText}
   const oiChange = readMetric(metricPayloads, ["oi_change", "oi_change_24h", "open_interest_change", "open_interest_change_percent", "open_interest_change_pct"]);
   const upside = readMetric(metricPayloads, ["top_upside_pressure", "upside", "upside_target", "resistance"]);
   const downside = readMetric(metricPayloads, ["top_downside_pressure", "downside", "downside_target", "support"]);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  console.log("Parsed fields:", { price, funding, priceChange, oiChange, upside, downside });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
   const hasCoreData =
     price !== null &&
