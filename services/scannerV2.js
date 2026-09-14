@@ -3548,29 +3548,21 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
-  const rawScan = await executeSkillWithFallback(
-    "altcoin_scanner_perp",
-    scanParams,
-    onProgress
-  );
+  let rawScan = null;
+  let primarySymbols = [];
+  let primaryDiscoveryError = null;
+  try {
+    rawScan = await executeSkillWithFallback(
+      "altcoin_scanner_perp",
+      scanParams,
+      onProgress
+    );
+    primarySymbols = extractSymbolsFromScan(rawScan);
+  } catch (error) {
+    primaryDiscoveryError = error;
+    console.warn("CMC market discovery unavailable; using Binance fallback:", error.message);
+  }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  const scanPayload = rawScan;
-  const primarySymbols = extractSymbolsFromScan(scanPayload);
   let symbols = primarySymbols;
   let usedBinanceFallback = false;
   if (symbols.length < MAX_SCAN_CANDIDATES) {
@@ -3644,7 +3636,9 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
     percent: 25,
     stage: "Candidate Detection",
     message: usedBinanceFallback
-      ? `✅ ${symbols.length} candidates detected (CMC + Binance discovery).`
+      ? primaryDiscoveryError
+        ? `✅ ${symbols.length} candidates detected (Binance fallback).`
+        : `✅ ${symbols.length} candidates detected (CMC + Binance discovery).`
       : `✅ ${symbols.length} candidates detected.`,
   });
 
