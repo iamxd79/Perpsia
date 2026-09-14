@@ -1,9 +1,13 @@
 const crypto = require("crypto");
+const os = require("os");
 const { openDatabase } = require("./database");
 
 const db = openDatabase();
-const ownerId = `${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
-const defaultTtlMs = 90 * 60 * 1000;
+const ownerId = `${process.env.RENDER_INSTANCE_ID || os.hostname()}-${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
+const configuredTtlMs = Number(process.env.PERPSIA_TELEGRAM_LOCK_TTL_MS);
+const defaultTtlMs = Number.isFinite(configuredTtlMs) && configuredTtlMs >= 30000
+  ? configuredTtlMs
+  : 2 * 60 * 1000;
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS process_locks (
@@ -47,6 +51,10 @@ function unlockScan() {
 
 function lockTelegramPolling() {
   return lockResource("telegram_polling");
+}
+
+function refreshTelegramPollingLock() {
+  return refreshResource("telegram_polling");
 }
 
 function unlockTelegramPolling() {

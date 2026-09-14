@@ -904,6 +904,9 @@ function startTelegramLockRenewal() {
   telegramLockRenewalTimer = setInterval(() => {
     if (!refreshTelegramPollingLock()) {
       console.error("Telegram polling lock could not be renewed.");
+      void Promise.resolve(bot.stopPolling?.()).catch(() => {});
+      releaseTelegramPollingLock();
+      scheduleTelegramPollingRetry();
     }
   }, 30000);
   telegramLockRenewalTimer.unref?.();
@@ -914,7 +917,17 @@ function releaseTelegramPollingLock() {
     clearInterval(telegramLockRenewalTimer);
     telegramLockRenewalTimer = null;
   }
-    releaseTelegramPollingLock();
+  if (telegramLockHeld) {
+    unlockTelegramPolling();
+    telegramLockHeld = false;
+  }
+}
+
+function clearTelegramPollingRetry() {
+  if (pollingRetryTimer) {
+    clearTimeout(pollingRetryTimer);
+    pollingRetryTimer = null;
+  }
 }
 
 async function startTelegramPolling() {
@@ -965,9 +978,6 @@ bot.on("polling_error", (error) => {
     scheduleTelegramPollingRetry();
     return;
   }
-
-
-
 
   console.error("Telegram polling error:", error?.message || error);
 });
@@ -5330,6 +5340,7 @@ function shutdown(signal) {
   structuredLog("info", "shutdown_started", { signal });
   streamManager.stop();
   stopScheduler();
+  clearTelegramPollingRetry();
   releaseTelegramPollingLock();
   stopAlchemyWatchlistSync();
   stopWalletRefresh();
