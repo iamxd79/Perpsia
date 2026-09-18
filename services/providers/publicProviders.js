@@ -1203,6 +1203,9 @@ function evidenceStatus(price, availableCount) {
 const BINANCE_DISCOVERY_TTL_MS = 60 * 1000;
 let binanceDiscoveryCache = { expiresAt: 0, symbols: [] };
 let bybitDiscoveryCache = { expiresAt: 0, symbols: [] };
+const DISCOVERY_TTL_MS = 60 * 1000;
+let okxDiscoveryCache = { expiresAt: 0, symbols: [] };
+let hyperliquidDiscoveryCache = { expiresAt: 0, symbols: [] };
 
 async function discoverBinancePerpetualSymbols(options = {}) {
   const limit = Math.min(100, Math.max(1, Number(options.limit || 54)));
@@ -1262,6 +1265,63 @@ async function discoverBybitPerpetualSymbols(options = {}) {
     })
     .map((item) => item.symbol);
   bybitDiscoveryCache = { expiresAt: now + BINANCE_DISCOVERY_TTL_MS, symbols: ranked };
+  return ranked.slice(0, limit);
+}
+
+
+async function discoverOkxPerpetualSymbols(options = {}) {
+  const limit = Math.min(100, Math.max(1, Number(options.limit || 54)));
+  const now = Date.now();
+  if (okxDiscoveryCache.expiresAt > now && okxDiscoveryCache.symbols.length) {
+    return okxDiscoveryCache.symbols.slice(0, limit);
+  }
+  const payload = await getJson(OKX + "/api/v5/market/tickers", {
+    ...options,
+    params: { instType: "SWAP" },
+  });
+  if (payload?.code !== undefined && String(payload.code) !== "0") {
+    throw new Error(payload.msg || "OKX market discovery failed");
+  }
+  const ranked = (Array.isArray(payload?.data) ? payload.data : [])
+    .filter((item) => String(item?.instId || "").endsWith("-USDT-SWAP"))
+    .map((item) => ({
+      symbol: String(item.instId).replace(/-USDT-SWAP$/, ""),
+      volume: Number(item.volCcy24h) || Number(item.vol24h) || 0,
+      priceChange: Number(item.open24h) && Number(item.last)
+        ? ((Number(item.last) - Number(item.open24h)) / Number(item.open24h)) * 100
+        : 0,
+    }))
+    .filter((item) => item.symbol)
+    .sort((left, right) => {
+      const leftScore = Math.log10(1 + left.volume) * 0.75 + Math.min(25, Math.abs(left.priceChange)) * 0.25;
+      const rightScore = Math.log10(1 + right.volume) * 0.75 + Math.min(25, Math.abs(right.priceChange)) * 0.25;
+      return rightScore - leftScore;
+    })
+    .map((item) => item.symbol);
+  okxDiscoveryCache = { expiresAt: DISCOVERY_TTL_MS + now, symbols: ranked };
+  return ranked.slice(0, limit);
+}
+
+async function discoverHyperliquidPerpetualSymbols(options = {}) {
+  const limit = Math.min(100, Math.max(1, Number(options.limit || 54)));
+  const now = Date.now();
+  if (hyperliquidDiscoveryCache.expiresAt > now && hyperliquidDiscoveryCache.symbols.length) {
+    return hyperliquidDiscoveryCache.symbols.slice(0, limit);
+  }
+  const payload = await postJson(HYPERLIQUID, { type: "metaAndAssetCtxs" }, options);
+  const universe = Array.isArray(payload?.[0]?.universe) ? payload[0].universe : [];
+  const contexts = Array.isArray(payload?.[1]) ? payload[1] : [];
+  const ranked = universe
+    .map((item, index) => ({
+      symbol: String(item?.name || ""),
+      volume: Number(contexts[index]?.dayNtlVlm) || 0,
+      priceChange: 0,
+    }))
+    .filter((item) => item.symbol && !item.symbol.includes(":"))
+    .sort((left, right) => right.volume - left.volume)
+    .map((item) => item.symbol);
+  if (!ranked.length) throw new Error("Hyperliquid returned no perpetual markets");
+  hyperliquidDiscoveryCache = { expiresAt: DISCOVERY_TTL_MS + now, symbols: ranked };
   return ranked.slice(0, limit);
 }
 
@@ -3745,6 +3805,8 @@ module.exports = {
   collectMarketEvidence,
   discoverBinancePerpetualSymbols,
   discoverBybitPerpetualSymbols,
+  discoverOkxPerpetualSymbols,
+  discoverHyperliquidPerpetualSymbols,
   fetchAlternative,
   fetchBinance,
   fetchBybit,
