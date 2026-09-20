@@ -24,19 +24,32 @@ function getLifecycleStage(current, previous) {
 
   if (!previous) {
     if (
-      current.category === "long" ||
-      current.category === "short"
+      (current.category === "long" || current.category === "short") &&
+      current.isActionable
     ) {
       return {
         stage: "CONFIRMED",
         previousStage: null,
         changed: true,
         reason:
-          "First recorded analysis already meets confirmed signal conditions.",
+          "First recorded analysis meets the confirmed signal conditions.",
         scoreDiff: 0,
       };
     }
 
+    if (
+      current.category === "long" ||
+      current.category === "short"
+    ) {
+      return {
+        stage: "DISCOVERED",
+        previousStage: null,
+        changed: true,
+        reason:
+          "A directional candidate was found but still requires confirmation.",
+        scoreDiff: 0,
+      };
+    }
     if (current.category === "watchlist") {
       return {
         stage: "DISCOVERED",
@@ -188,8 +201,14 @@ function getLifecycleStage(current, previous) {
     current.category === "long" ||
     current.category === "short"
   ) {
+    if (!current.isActionable) {
+      stage = previousStage === "BUILDING" || previousStage === "WEAKENING"
+        ? previousStage
+        : "DISCOVERED";
+      reason = "Directional candidate remains visible but is not yet confirmed.";
+    }
     // New confirmation
-    if (
+    else if (
       previousStage !== "CONFIRMED" &&
       previousStage !== "ACTIVE"
     ) {

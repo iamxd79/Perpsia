@@ -48,7 +48,8 @@ const { validateSignal } = require("./openaiSignalValidation");
 
 
 const ACTIVE_SIGNAL_SCORE = 70;
-const WATCHLIST_SCORE = 40;
+const DIRECTIONAL_CANDIDATE_SCORE = 40;
+const WATCHLIST_SCORE = 35;
 const MAX_SCAN_CANDIDATES = Math.min(100, Math.max(1, Number(process.env.PERPSIA_MAX_SCAN_CANDIDATES || 54)));
 
 const VENUE_DISCOVERY = {
@@ -3187,11 +3188,15 @@ ${mtfText}
   } else if (isOverextended) {
     marketState = "Overextended / Avoid Chasing";
     category = "neutral";
-  } else if (score >= ACTIVE_SIGNAL_SCORE && direction === "Bullish") {
-    marketState = "Active Long Candidate";
+  } else if (score >= DIRECTIONAL_CANDIDATE_SCORE && direction === "Bullish") {
+    marketState = score >= ACTIVE_SIGNAL_SCORE
+      ? "Active Long Candidate"
+      : "Early Long Candidate / Confirmation Required";
     category = "long";
-  } else if (score >= ACTIVE_SIGNAL_SCORE && direction === "Bearish") {
-    marketState = "Active Short Candidate";
+  } else if (score >= DIRECTIONAL_CANDIDATE_SCORE && direction === "Bearish") {
+    marketState = score >= ACTIVE_SIGNAL_SCORE
+      ? "Active Short Candidate"
+      : "Early Short Candidate / Confirmation Required";
     category = "short";
   } else if (score >= WATCHLIST_SCORE && direction !== "Neutral") {
     if (direction === "Bullish" && deeplyNegativeFunding) {

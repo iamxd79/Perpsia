@@ -11,8 +11,12 @@ function shouldSendAlert(current, previous) {
     if (current.category === "long" || current.category === "short") {
       return {
         shouldAlert: true,
-        reason: "New actionable signal detected.",
-        alertType: "new_actionable_signal",
+        reason: current.isActionable
+          ? "New actionable signal detected."
+          : "New directional candidate detected; confirmation is still required.",
+        alertType: current.isActionable
+          ? "new_actionable_signal"
+          : "new_directional_candidate",
       };
     }
 

@@ -125,6 +125,27 @@ test("uses coherent public perpetual evidence when CMC perp analysis is unavaila
   assert.equal(signal.direction, "Bullish");
   assert.match(signal.reasons.join(" "), /coherent bullish setup/i);
 });
+test("exposes directional early candidates without recording them as actionable", () => {
+  const records = ["binance", "okx"].map((provider) => ({
+    provider,
+    status: "ok",
+    marketType: "perpetual",
+    price: 1,
+    priceChange: 3,
+    funding: -0.0005,
+    orderbook: { imbalance: 0.2 },
+    metadata: { openInterestChangePct: 0 },
+  }));
+  const signal = classifyCandidate("SATS", {
+    accumulation: "accumulation breakout transition",
+    perp: "price_up_oi_up",
+    marketEvidence: records,
+  });
+  assert.equal(signal.direction, "Bullish");
+  assert.equal(signal.category, "long");
+  assert.equal(signal.isActionable, false);
+  assert.match(signal.marketState, /Early Long Candidate/);
+});
 test("turns coherent public evidence into actionable LONG and SHORT signals", () => {
   const buildEvidence = (priceChange) => [{
     provider: "binance",
