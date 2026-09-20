@@ -3829,8 +3829,8 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
   const results = [];
   const errors = [];
-  const configuredDeepAnalysisLimit = Number(process.env.PERPSIA_DEEP_ANALYSIS_CANDIDATES || 12);
-  const deepAnalysisLimit = Math.min(symbols.length, Math.max(0, Number.isFinite(configuredDeepAnalysisLimit) ? configuredDeepAnalysisLimit : 12));
+  const configuredDeepAnalysisLimit = Number(process.env.PERPSIA_DEEP_ANALYSIS_CANDIDATES || 4);
+  const deepAnalysisLimit = Math.min(symbols.length, Math.max(0, Number.isFinite(configuredDeepAnalysisLimit) ? configuredDeepAnalysisLimit : 4));
 
 
 
