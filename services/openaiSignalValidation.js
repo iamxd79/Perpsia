@@ -20,7 +20,8 @@ function getClient(options = {}) {
 }
 
 function enabled(options = {}) {
-  return options.enabled === true || process.env.PERPSIA_ENABLE_OPENAI_SIGNAL_VALIDATION === "true";
+  if (typeof options.enabled === "boolean") return options.enabled;
+  return process.env.PERPSIA_ENABLE_OPENAI_SIGNAL_VALIDATION === "true";
 }
 
 function normalizeDirection(value) {

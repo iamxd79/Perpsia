@@ -3836,6 +3836,9 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
   const errors = [];
   const configuredDeepAnalysisLimit = Number(process.env.PERPSIA_DEEP_ANALYSIS_CANDIDATES || 4);
   const deepAnalysisLimit = Math.min(symbols.length, Math.max(0, Number.isFinite(configuredDeepAnalysisLimit) ? configuredDeepAnalysisLimit : 4));
+  const configuredAiValidationLimit = Number(process.env.PERPSIA_AI_VALIDATION_CANDIDATES || 12);
+  const aiValidationLimit = Math.min(symbols.length, Math.max(0, Number.isFinite(configuredAiValidationLimit) ? configuredAiValidationLimit : 12));
+  let aiValidationCount = 0;
 
 
 
@@ -4352,17 +4355,29 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
         fundamental,
         marketEvidence: evidenceRecords,
       });
+      // Run model research after deterministic evidence is available. Deep analysis
+      // may ask the models to resolve a neutral but data-complete candidate; wide
+      // scans ask them only for directional candidates, never for unusable data.
+      const aiEligible = baseSignal.hasCoreData && (
+        deepAnalysis || baseSignal.direction !== "Neutral"
+      );
+      const useAiValidation = aiEligible && aiValidationCount < aiValidationLimit;
+      if (useAiValidation) aiValidationCount += 1;
       const research = await researchAsset({
         symbol,
         signal: baseSignal,
         evidence: evidenceRecords,
-        options: { enabled: deepAnalysis && options.enableGrokResearch === true },
+        options: {
+          enabled: useAiValidation && options.enableGrokResearch !== false,
+        },
       });
       const openaiValidation = await validateSignal({
         symbol,
         signal: baseSignal,
         evidence: evidenceRecords,
-        options: { enabled: deepAnalysis && options.enableOpenAISignalValidation !== false },
+        options: {
+          enabled: useAiValidation && options.enableOpenAISignalValidation !== false,
+        },
       });
 
       const result = {

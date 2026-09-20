@@ -39,7 +39,8 @@ const researchSchema = {
 };
 
 function enabled(options = {}) {
-  return options.enabled === true || process.env.PERPSIA_ENABLE_GROK_RESEARCH === "true";
+  if (typeof options.enabled === "boolean") return options.enabled;
+  return process.env.PERPSIA_ENABLE_GROK_RESEARCH === "true";
 }
 
 function getClient(options = {}) {
