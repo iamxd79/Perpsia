@@ -47,8 +47,17 @@ async function createCmcClient() {
     }
   );
 
-  await client.connect(transport);
-  return client;
+  try {
+    await withTimeout(
+      client.connect(transport),
+      boundedTimeout(process.env.CMC_CONNECT_TIMEOUT_MS, 30000),
+      "CMC MCP connection"
+    );
+    return client;
+  } catch (error) {
+    await client.close().catch(() => {});
+    throw error;
+  }
 }
 
 function boundedTimeout(value, fallback) {
@@ -56,6 +65,22 @@ function boundedTimeout(value, fallback) {
   return Math.min(Math.max(Number.isFinite(parsed) ? parsed : fallback, 10000), 300000);
 }
 
+async function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(label + " timed out after " + timeoutMs + "ms");
+      error.code = "ETIMEDOUT";
+      reject(error);
+    }, timeoutMs);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 function cmcRetries() {
   const parsed = Number(process.env.CMC_REQUEST_RETRIES ?? 1);
   return Math.min(Math.max(Number.isFinite(parsed) ? parsed : 1, 0), 2);
