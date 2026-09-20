@@ -48,7 +48,7 @@ const { validateSignal } = require("./openaiSignalValidation");
 
 
 const ACTIVE_SIGNAL_SCORE = 70;
-const DIRECTIONAL_CANDIDATE_SCORE = 40;
+const DIRECTIONAL_CANDIDATE_SCORE = 10;
 const WATCHLIST_SCORE = 35;
 const MAX_SCAN_CANDIDATES = Math.min(100, Math.max(1, Number(process.env.PERPSIA_MAX_SCAN_CANDIDATES || 54)));
 
