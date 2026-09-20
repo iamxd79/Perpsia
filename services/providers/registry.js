@@ -60,7 +60,11 @@ function registerProvider(definition) {
   breakers.set(id, new CircuitBreaker(
     definitions.get(id).circuitThreshold,
     definitions.get(id).circuitTimeoutMs,
-    { name: id },
+    {
+      name: id,
+      failurePredicate: (error) =>
+        isRetryableError(error) || error?.code === "NO_USABLE_RESPONSE",
+    },
   ));
   return definitions.get(id);
 }

@@ -1133,7 +1133,11 @@ function settledValue(result) {
 
 
 function evidenceStatus(price, availableCount) {
-  if (availableCount === 0) throw new Error("provider returned no usable response");
+  if (availableCount === 0) {
+    const error = new Error("provider returned no usable response");
+    error.code = "NO_USABLE_RESPONSE";
+    throw error;
+  }
   return price === null ? "degraded" : "ok";
 }
 

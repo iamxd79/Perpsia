@@ -71,3 +71,17 @@ test("circuit breaker opens after its failure threshold", async () => {
   }));
   assert.equal(breaker.snapshot().state, "OPEN");
 });
+
+test("circuit breaker treats no-usable provider responses as failures", async () => {
+  const breaker = new CircuitBreaker(2, 60000, {
+    failurePredicate: (error) => error?.code === "NO_USABLE_RESPONSE",
+  });
+  const fail = async () => {
+    const error = new Error("provider returned no usable response");
+    error.code = "NO_USABLE_RESPONSE";
+    throw error;
+  };
+  await assert.rejects(() => breaker.execute(fail));
+  await assert.rejects(() => breaker.execute(fail));
+  assert.equal(breaker.snapshot().state, "OPEN");
+});
