@@ -65,6 +65,7 @@ function progressBar(percent) {
 
 
 async function safeEditMessage(bot, chatId, messageId, text) {
+  if (!messageId) return;
   try {
     await bot.editMessageText(text, {
       chat_id: chatId,
@@ -152,7 +153,10 @@ async function runScheduledScan({ bot, chatId, venue }) {
 
 
 
-  const loading = await bot.sendMessage(
+  let loading = null;
+
+  try {
+    loading = await bot.sendMessage(
     chatId,
     `🤖 PERPSIA AUTONOMOUS SCAN
 
@@ -164,12 +168,11 @@ Booting scheduled market intelligence scan...`
 
 
 
-  try {
     const result = await runMarketScan(selectedVenue, async (progress) => {
       await safeEditMessage(
         bot,
         chatId,
-        loading.message_id,
+        loading?.message_id,
         `🤖 PERPSIA AUTONOMOUS SCAN
 
 ${progressBar(progress.percent)} ${progress.percent}%
@@ -187,7 +190,7 @@ ${progress.stage}`
     await safeEditMessage(
       bot,
       chatId,
-      loading.message_id,
+      loading?.message_id,
       `✅ PERPSIA AUTONOMOUS SCAN COMPLETE
 
 ${progressBar(100)} 100%
@@ -288,7 +291,7 @@ Checking memory and alert conditions...`
     await safeEditMessage(
       bot,
       chatId,
-      loading.message_id,
+      loading?.message_id,
       `❌ PERPSIA SCHEDULED SCAN FAILED
 
 Reason:
