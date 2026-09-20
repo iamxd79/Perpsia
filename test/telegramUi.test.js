@@ -83,6 +83,7 @@ test("renders compact scan summary and drill-down buttons", () => {
   assert.match(summary, /2 strong setups/);
   assert.match(summary, /1 watchlist/);
   assert.match(summary, /2 filtered out/);
+  assert.match(summary, /1 data issues/);
   assert.deepEqual(
     scanSummaryKeyboard("OKX").inline_keyboard.flat().map((button) => button.text),
     ["View Top Setups", "View Watchlist", "Run Again"]

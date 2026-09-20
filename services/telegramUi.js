@@ -215,6 +215,7 @@ function scanCounts(result = {}) {
     strong: longs.length + shorts.length,
     watchlist: watchlist.length,
     filtered: neutral.length + errors.length,
+    errors: errors.length,
   };
 }
 
@@ -229,6 +230,7 @@ function formatScanSummary(result = {}, options = {}) {
     counts.watchlist + " watchlist",
     counts.filtered + " filtered out",
   ];
+  if (counts.errors > 0) lines.push(counts.errors + " data issues");
   return lines
     .filter((line, index) => line !== "" || (index > 0 && lines[index - 1] !== ""))
     .join("\n")
