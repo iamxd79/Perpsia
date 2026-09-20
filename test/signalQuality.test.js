@@ -55,6 +55,8 @@ test("provider routing separates perpetual and DEX token workloads", () => {
   assert.ok(perpetual.providers.includes("binance"));
   assert.ok(perpetual.providers.includes("alternative"));
   assert.ok(!perpetual.providers.includes("goplus"));
+  assert.ok(!perpetual.providers.includes("dexscreener"));
+  assert.ok(routeProviders("BTC", { includeDexCrossCheck: true }).providers.includes("dexscreener"));
 
   const dex = routeProviders("NEW", {
     assetType: "small_dex",

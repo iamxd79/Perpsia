@@ -246,6 +246,7 @@ function routeProviders(symbol, options = {}) {
   const assetType = String(options.assetType || "").toLowerCase();
   const hasContract = Boolean(options.contractAddress || options.tokenAddress);
   const dexAsset = assetType === "dex" || assetType === "small_dex" || options.isNewToken || hasContract;
+  const includeDexCrossCheck = options.includeDexCrossCheck === true || process.env.PERPSIA_ENABLE_DEX_CEX_CROSSCHECK === "true";
   const providers = [];
   const add = (name) => {
     if (!providers.includes(name)) providers.push(name);
@@ -263,7 +264,7 @@ function routeProviders(symbol, options = {}) {
     }
   } else {
     for (const provider of CEX_PROVIDERS) add(provider);
-    add("dexscreener");
+    if (includeDexCrossCheck) add("dexscreener");
     add("alternative");
     if (options.includeFred && process.env.FRED_API_KEY) add("fred");
   }
@@ -280,7 +281,9 @@ function routeProviders(symbol, options = {}) {
     providers,
     rationale: dexAsset
       ? "DEX and security evidence prioritized for contract-discovered assets."
-      : "Derivatives, spot/orderbook, DEX cross-check and macro sentiment prioritized for perpetual assets.",
+      : includeDexCrossCheck
+        ? "Derivatives, spot/orderbook, verified DEX cross-check and macro sentiment prioritized for perpetual assets."
+        : "Derivatives, spot/orderbook and macro sentiment prioritized for perpetual assets; DEX lookup requires verified identity.",
   };
 }
 
