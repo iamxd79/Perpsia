@@ -311,7 +311,12 @@ function getIntegrationHealth() {
   return {
     cmc: { configured: has("CMC_MCP_ENDPOINT"), circuit: cmcCircuitBreaker.snapshot() },
     grok: { enabled: process.env.PERPSIA_ENABLE_GROK_RESEARCH === "true", configured: has("XAI_API_KEY"), model: process.env.XAI_MODEL || "grok-4.6" },
-    openai: { enabled: process.env.PERPSIA_ENABLE_OPENAI_SIGNAL_VALIDATION === "true", configured: has("OPENAI_API_KEY"), model: process.env.OPENAI_SIGNAL_MODEL || "gpt-5.5" },
+    openai: {
+      enabled: process.env.PERPSIA_ENABLE_OPENAI_SIGNAL_VALIDATION === "true" || has("OPENAI_API_KEY"),
+      configured: has("OPENAI_API_KEY"),
+      activation: "default_on_when_configured",
+      model: process.env.OPENAI_SIGNAL_MODEL || "gpt-5.5",
+    },
   };
 }
 const {
