@@ -164,10 +164,16 @@ async function runScheduledScan({ bot, chatId, venue }) {
   schedulerState.lastRunAt = new Date().toISOString();
   schedulerState.lastRunStatus = "running";
   schedulerState.lastError = null;
+  schedulerState.lastProgressAt = new Date().toISOString();
+  schedulerState.lastProgress = { percent: 0, stage: "startup", message: "Starting scheduled scan" };
   console.log("Scheduled scan started.");
 
 
 
+
+  const configuredScanTimeoutMs = Number(process.env.PERPSIA_SCHEDULER_SCAN_TIMEOUT_MS || 12 * 60 * 1000);
+  const scanTimeoutMs = Math.min(Math.max(Number.isFinite(configuredScanTimeoutMs) ? configuredScanTimeoutMs : 12 * 60 * 1000, 60 * 1000), 30 * 60 * 1000);
+  const scanDeadlineAt = Date.now() + scanTimeoutMs;
 
   let loading = null;
 
@@ -185,6 +191,8 @@ Booting scheduled market intelligence scan...`
 
 
     const result = await runMarketScan(selectedVenue, async (progress) => {
+      schedulerState.lastProgressAt = new Date().toISOString();
+      schedulerState.lastProgress = { percent: progress.percent, stage: progress.stage, message: progress.message };
       await safeEditMessage(
         bot,
         chatId,
@@ -198,8 +206,7 @@ ${progress.message}
 Current stage:
 ${progress.stage}`
       );
-    });
-
+    }, { deadlineAt: scanDeadlineAt });
 
 
 
@@ -332,6 +339,8 @@ let schedulerState = {
   lastRunAt: null,
   lastRunStatus: null,
   lastError: null,
+  lastProgressAt: null,
+  lastProgress: null,
   lastSignalCounts: null,
 };
 
@@ -347,6 +356,8 @@ function getSchedulerHealth() {
     lastRunAt: schedulerState.lastRunAt,
     lastRunStatus: schedulerState.lastRunStatus,
     lastError: schedulerState.lastError,
+    lastProgressAt: schedulerState.lastProgressAt,
+    lastProgress: schedulerState.lastProgress,
     lastSignalCounts: schedulerState.lastSignalCounts,
   };
 }

@@ -3876,6 +3876,10 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
     try {
+      if (options.deadlineAt && Date.now() >= Number(options.deadlineAt)) {
+        throw new Error("Market scan deadline exceeded before analyzing " + symbol);
+      }
+
       await onProgress({
         percent: basePercent,
         stage: `$${symbol} Early Structure`,
