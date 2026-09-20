@@ -129,6 +129,7 @@ function buildPerpAnalysisParams(symbol, venue = DEFAULT_VENUE, params = {}) {
 
   for (const forbiddenKey of [
     "venue",
+    "timeframe",
     "exchange_list",
     "spot_exchange_list",
     "orderbook_exchange",
