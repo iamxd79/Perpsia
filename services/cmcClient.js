@@ -73,7 +73,6 @@ async function withTimeout(promise, timeoutMs, label) {
       error.code = "ETIMEDOUT";
       reject(error);
     }, timeoutMs);
-    timer.unref?.();
   });
   try {
     return await Promise.race([promise, timeout]);

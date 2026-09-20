@@ -73,7 +73,6 @@ async function withTelegramTimeout(promise, label) {
       error.code = "TELEGRAM_TIMEOUT";
       reject(error);
     }, timeoutMs);
-    timer.unref?.();
   });
   try {
     return await Promise.race([promise, timeout]);
