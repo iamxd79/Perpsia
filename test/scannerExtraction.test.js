@@ -112,3 +112,36 @@ test("uses coherent public perpetual evidence when CMC perp analysis is unavaila
   assert.equal(signal.direction, "Bullish");
   assert.match(signal.reasons.join(" "), /coherent bullish setup/i);
 });
+test("turns coherent public evidence into actionable LONG and SHORT signals", () => {
+  const buildEvidence = (priceChange) => [{
+    provider: "binance",
+    status: "ok",
+    usable: true,
+    symbol: "BTC",
+    marketType: "perpetual",
+    currentPrice: 60000,
+    priceChange,
+    funding: 0.0001,
+    metadata: { openInterestChangePct: 50 },
+  }];
+
+  const long = classifyCandidate("BTC", {
+    accumulation: "accumulation breakout transition",
+    perp: "price_up_oi_up",
+    mtf: "full bullish",
+    marketEvidence: buildEvidence(4),
+  });
+  const short = classifyCandidate("BTC", {
+    accumulation: "accumulation breakout transition",
+    perp: "price_down_oi_up",
+    mtf: "full bearish",
+    marketEvidence: buildEvidence(-4),
+  });
+
+  assert.equal(long.direction, "Bullish");
+  assert.equal(long.category, "long");
+  assert.equal(long.isActionable, true);
+  assert.equal(short.direction, "Bearish");
+  assert.equal(short.category, "short");
+  assert.equal(short.isActionable, true);
+});
