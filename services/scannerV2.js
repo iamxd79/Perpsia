@@ -804,6 +804,13 @@ function readMetric(payloads, aliases) {
   return toFiniteNumber(readStructuredValue(payloads, aliases));
 }
 
+function medianFinite(values) {
+  const numbers = values.map(toFiniteNumber).filter((value) => value !== null).sort((a, b) => a - b);
+  if (!numbers.length) return null;
+  const middle = Math.floor(numbers.length / 2);
+  return numbers.length % 2 ? numbers[middle] : (numbers[middle - 1] + numbers[middle]) / 2;
+}
+
 
 
 
@@ -2253,18 +2260,17 @@ ${mtfText}
 
 
 
-  const metricPayloads = [packs.accumulation, packs.perp, packs.orderbook, packs.mtf];
+  const metricPayloads = [packs.accumulation, packs.perp, packs.orderbook, packs.mtf, ...marketEvidence];
   const price = readMetric(metricPayloads, ["current_price", "mark_price", "last_price", "price"]);
   const funding = readMetric(metricPayloads, ["funding", "funding_rate", "funding_percent", "funding_pct"]);
   const priceChange = readMetric(metricPayloads, ["price_change", "price_change_24h", "price_change_percent", "price_change_pct", "change_24h"]);
-  const oiChange = readMetric(metricPayloads, ["oi_change", "oi_change_24h", "open_interest_change", "open_interest_change_percent", "open_interest_change_pct"]);
+  const oiChange = readMetric(metricPayloads, ["oi_change", "oi_change_24h", "open_interest_change", "open_interest_change_percent", "open_interest_change_pct", "openInterestChangePct"]);
   const upside = readMetric(metricPayloads, ["top_upside_pressure", "upside", "upside_target", "resistance"]);
   const downside = readMetric(metricPayloads, ["top_downside_pressure", "downside", "downside_target", "support"]);
 
   const hasCoreData =
     price !== null &&
     priceChange !== null &&
-    oiChange !== null &&
     funding !== null;
 
 
@@ -2517,6 +2523,34 @@ ${mtfText}
 
   if (bullishPerp && !bearishPerp) direction = "Bullish";
   if (bearishPerp && !bullishPerp) direction = "Bearish";
+
+  const publicPerpRecords = marketEvidence.filter((record) =>
+    record && record.marketType === "perpetual" && record.status === "ok" && record.usable !== false
+  );
+  const publicImbalance = medianFinite(publicPerpRecords.map((record) => record.orderbook?.imbalance));
+  const publicBullish = (
+    priceChange !== null && priceChange >= 1 && oiChange !== null && oiChange > 0
+  ) || (
+    publicImbalance !== null && publicImbalance >= 0.12 && priceChange !== null && priceChange >= -1
+  ) || (
+    funding !== null && funding <= -0.0003 && priceChange !== null && priceChange >= 0
+  );
+  const publicBearish = (
+    priceChange !== null && priceChange <= -1 && oiChange !== null && oiChange > 0
+  ) || (
+    publicImbalance !== null && publicImbalance <= -0.12 && priceChange !== null && priceChange <= 1
+  ) || (
+    funding !== null && funding >= 0.0003 && priceChange !== null && priceChange <= 0
+  );
+  if (direction === "Neutral" && publicBullish && !publicBearish) {
+    direction = "Bullish";
+    score += 10;
+    reasons.push("Public perpetual evidence shows a coherent bullish setup.");
+  } else if (direction === "Neutral" && publicBearish && !publicBullish) {
+    direction = "Bearish";
+    score += 10;
+    reasons.push("Public perpetual evidence shows a coherent bearish setup.");
+  }
 
 
 

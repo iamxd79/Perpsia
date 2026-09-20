@@ -90,3 +90,25 @@ test("extracts symbols from the CMC ranked candidate queue heading", () => {
   };
   assert.deepEqual(extractSymbolsFromScan(payload), ["CAP", "SOXL", "RBLX"]);
 });
+
+test("uses coherent public perpetual evidence when CMC perp analysis is unavailable", () => {
+  const records = ["binance", "okx"].map((provider) => ({
+    provider,
+    status: "ok",
+    symbol: "BTC",
+    marketType: "perpetual",
+    price: 60000,
+    priceChange: 4,
+    funding: -0.0005,
+    orderbook: { imbalance: 0.15 },
+    metadata: { openInterestChangePct: 6 },
+  }));
+  const signal = classifyCandidate("BTC", {
+    accumulation: {},
+    perp: { status: "unavailable" },
+    marketEvidence: records,
+  });
+  assert.equal(signal.hasCoreData, true);
+  assert.equal(signal.direction, "Bullish");
+  assert.match(signal.reasons.join(" "), /coherent bullish setup/i);
+});
