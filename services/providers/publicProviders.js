@@ -3693,7 +3693,10 @@ async function collectMarketEvidence(symbol, options = {}) {
   };
   const providerIds = defaultProviderIds(options);
   if (process.env.PERPSIA_ENABLE_WEBSOCKETS !== "false") {
-    getStreamManager().ensureSubscriptions(providerIds, context.symbol);
+    const streamProviders = options.venue
+      ? providerIds.filter((provider) => String(provider).toLowerCase() === String(options.venue).toLowerCase())
+      : providerIds;
+    getStreamManager().ensureSubscriptions(streamProviders, context.symbol);
   }
   const records = await collectProviders(providerIds, context);
   const cmcEvidence = options.cmcEvidence

@@ -51,6 +51,13 @@ const ACTIVE_SIGNAL_SCORE = 70;
 const WATCHLIST_SCORE = 40;
 const MAX_SCAN_CANDIDATES = Math.min(100, Math.max(1, Number(process.env.PERPSIA_MAX_SCAN_CANDIDATES || 54)));
 
+const VENUE_DISCOVERY = {
+  Binance: discoverBinancePerpetualSymbols,
+  Bybit: discoverBybitPerpetualSymbols,
+  OKX: discoverOkxPerpetualSymbols,
+  Hyperliquid: discoverHyperliquidPerpetualSymbols,
+};
+
 
 
 
@@ -2003,6 +2010,25 @@ function extractSymbolsFromScan(scanPayload) {
 
 
 
+
+async function filterToVenuePerpetuals(symbols, venue, options = {}) {
+  const discover = VENUE_DISCOVERY[venue];
+  if (typeof discover !== "function") {
+    return { symbols, validated: false, eligibleCount: null };
+  }
+
+  const discovered = await discover({
+    limit: Math.min(100, Math.max(MAX_SCAN_CANDIDATES, Number(options.discoveryLimit || 100))),
+    timeoutMs: options.timeoutMs || 8000,
+  });
+  const eligible = new Set((discovered || []).map((item) => String(item).toUpperCase()));
+  return {
+    symbols: (symbols || []).filter((symbol) => eligible.has(String(symbol).toUpperCase())),
+    validated: true,
+    eligibleCount: eligible.size,
+  };
+}
+
 function buildConfirmationNeeded({
   direction,
   oiChange,
@@ -3640,6 +3666,23 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
       onProgress
     );
     primarySymbols = extractSymbolsFromScan(rawScan);
+    try {
+      const validation = await filterToVenuePerpetuals(primarySymbols, venue, {
+        timeoutMs: options.discoveryTimeoutMs || 8000,
+      });
+      if (validation.validated) {
+        console.info(JSON.stringify({
+          event: "venue_symbol_validation",
+          venue,
+          extracted: primarySymbols.length,
+          eligible: validation.symbols.length,
+          venueMarkets: validation.eligibleCount,
+        }));
+        primarySymbols = validation.symbols;
+      }
+    } catch (error) {
+      console.warn("Venue perpetual validation unavailable; retaining CMC candidates:", error.message);
+    }
   } catch (error) {
     primaryDiscoveryError = error;
     console.warn("CMC market discovery unavailable; using Binance fallback:", error.message);
@@ -3649,7 +3692,8 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
   let usedMarketDiscoveryFallback = false;
   if (symbols.length < MAX_SCAN_CANDIDATES) {
     try {
-      const fallbackSymbols = await discoverBinancePerpetualSymbols({
+      const discoverVenue = VENUE_DISCOVERY[venue] || discoverBinancePerpetualSymbols;
+      const fallbackSymbols = await discoverVenue({
         limit: MAX_SCAN_CANDIDATES,
         timeoutMs: options.discoveryTimeoutMs || 8000,
       });
