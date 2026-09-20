@@ -3824,6 +3824,8 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
   const results = [];
   const errors = [];
+  const configuredDeepAnalysisLimit = Number(process.env.PERPSIA_DEEP_ANALYSIS_CANDIDATES || 12);
+  const deepAnalysisLimit = Math.min(symbols.length, Math.max(0, Number.isFinite(configuredDeepAnalysisLimit) ? configuredDeepAnalysisLimit : 12));
 
 
 
@@ -3842,6 +3844,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
   for (let i = 0; i < symbols.length; i++) {
     const symbol = symbols[i];
+    const deepAnalysis = i < deepAnalysisLimit;
 
 
 
@@ -3921,11 +3924,13 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
-      const accumulation = await executeOptionalSkill(
-        "detect_accumulation_breakout_transition",
-        accumParams,
-        onProgress
-      );
+      const accumulation = deepAnalysis
+        ? await executeOptionalSkill(
+            "detect_accumulation_breakout_transition",
+            accumParams,
+            onProgress
+          )
+        : { status: "skipped", evidenceQuality: "wide_scan_only" };
 
 
 
@@ -3984,11 +3989,13 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
-      const perp = await executeOptionalSkill(
-        "perp_contract_analysis",
-        perpParams,
-        onProgress
-      );
+      const perp = deepAnalysis
+        ? await executeOptionalSkill(
+            "perp_contract_analysis",
+            perpParams,
+            onProgress
+          )
+        : { status: "skipped", evidenceQuality: "wide_scan_only" };
 
 
 
@@ -4046,14 +4053,16 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
-      const liquidation = await analyzeLiquidationFlow(
-        symbol,
-        "4h",
-        "7d",
-        venue,
-        referencePrice,
-        perp
-      );
+      const liquidation = deepAnalysis
+        ? await analyzeLiquidationFlow(
+            symbol,
+            "4h",
+            "7d",
+            venue,
+            referencePrice,
+            perp
+          )
+        : { status: "skipped", evidenceQuality: "wide_scan_only" };
 
 
 
@@ -4091,7 +4100,9 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
-      const whaleActivity = await checkWhaleActivity(symbol);
+      const whaleActivity = deepAnalysis
+        ? await checkWhaleActivity(symbol)
+        : { status: "skipped", evidenceQuality: "wide_scan_only" };
 
 
 
@@ -4146,35 +4157,23 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
-      let orderbook = {};
-      try {
-        orderbook = await executeSkillWithFallback(
-          "review_perp_orderbook_pressure",
-          orderbookParams,
-          onProgress
-        );
-      } catch (error) {
-        console.warn("CMC orderbook evidence unavailable for " + symbol + ":", error.message);
-        orderbook = {
-          status: "unavailable",
-          error: error.message,
-          evidenceQuality: "missing",
-        };
+      let orderbook = { status: "skipped", evidenceQuality: "wide_scan_only" };
+      if (deepAnalysis) {
+        try {
+          orderbook = await executeSkillWithFallback(
+            "review_perp_orderbook_pressure",
+            orderbookParams,
+            onProgress
+          );
+        } catch (error) {
+          console.warn("CMC orderbook evidence unavailable for " + symbol + ":", error.message);
+          orderbook = {
+            status: "unavailable",
+            error: error.message,
+            evidenceQuality: "missing",
+          };
+        }
       }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
       await onProgress({
@@ -4218,11 +4217,13 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
-      const mtf = await executeOptionalSkill(
-        "analyze_multi_timeframe_trend_alignment",
-        mtfParams,
-        onProgress
-      );
+      const mtf = deepAnalysis
+        ? await executeOptionalSkill(
+            "analyze_multi_timeframe_trend_alignment",
+            mtfParams,
+            onProgress
+          )
+        : { status: "skipped", evidenceQuality: "wide_scan_only" };
 
 
 
@@ -4260,10 +4261,12 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
-      const correlation = await analyzeCorrelation(symbol, "7d", {
-        executeSkill: (skillName, params) =>
-          executeSkillWithFallback(skillName, params, onProgress),
-      });
+      const correlation = deepAnalysis
+        ? await analyzeCorrelation(symbol, "7d", {
+            executeSkill: (skillName, params) =>
+              executeSkillWithFallback(skillName, params, onProgress),
+          })
+        : { status: "skipped", evidenceQuality: "wide_scan_only" };
 
 
 
@@ -4296,11 +4299,11 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
         gmgnChain: options.gmgnChain,
         contractAddress: options.contractAddress || options.tokenAddress,
         tokenAddress: options.tokenAddress,
-        cmcEvidence: {
+        cmcEvidence: deepAnalysis ? {
           metadata: {
             skills: ["detect_accumulation_breakout_transition", "perp_contract_analysis", "review_perp_orderbook_pressure", "analyze_multi_timeframe_trend_alignment"],
           },
-        },
+        } : null,
       });
 
 
@@ -4343,13 +4346,13 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
         symbol,
         signal: baseSignal,
         evidence: evidenceRecords,
-        options: { enabled: options.enableGrokResearch === true },
+        options: { enabled: deepAnalysis && options.enableGrokResearch === true },
       });
       const openaiValidation = await validateSignal({
         symbol,
         signal: baseSignal,
         evidence: evidenceRecords,
-        options: { enabled: options.enableOpenAISignalValidation !== false },
+        options: { enabled: deepAnalysis && options.enableOpenAISignalValidation !== false },
       });
 
       const result = {
@@ -4368,6 +4371,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
           marketEvidence: evidenceRecords,
         }),
         venue,
+        analysisDepth: deepAnalysis ? "deep" : "wide",
       };
 
 
