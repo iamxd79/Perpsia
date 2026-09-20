@@ -3659,33 +3659,38 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
   let rawScan = null;
   let primarySymbols = [];
   let primaryDiscoveryError = null;
-  try {
-    rawScan = await executeSkillWithFallback(
-      "altcoin_scanner_perp",
-      scanParams,
-      onProgress
-    );
-    primarySymbols = extractSymbolsFromScan(rawScan);
+  if (process.env.PERPSIA_ENABLE_CMC_MARKET_DISCOVERY === "true") {
     try {
-      const validation = await filterToVenuePerpetuals(primarySymbols, venue, {
-        timeoutMs: options.discoveryTimeoutMs || 8000,
-      });
-      if (validation.validated) {
-        console.info(JSON.stringify({
-          event: "venue_symbol_validation",
-          venue,
-          extracted: primarySymbols.length,
-          eligible: validation.symbols.length,
-          venueMarkets: validation.eligibleCount,
-        }));
-        primarySymbols = validation.symbols;
+      rawScan = await executeSkillWithFallback(
+        "altcoin_scanner_perp",
+        scanParams,
+        onProgress
+      );
+      primarySymbols = extractSymbolsFromScan(rawScan);
+      try {
+        const validation = await filterToVenuePerpetuals(primarySymbols, venue, {
+          timeoutMs: options.discoveryTimeoutMs || 8000,
+        });
+        if (validation.validated) {
+          console.info(JSON.stringify({
+            event: "venue_symbol_validation",
+            venue,
+            extracted: primarySymbols.length,
+            eligible: validation.symbols.length,
+            venueMarkets: validation.eligibleCount,
+          }));
+          primarySymbols = validation.symbols;
+        }
+      } catch (error) {
+        console.warn("Venue perpetual validation unavailable; retaining CMC candidates:", error.message);
       }
     } catch (error) {
-      console.warn("Venue perpetual validation unavailable; retaining CMC candidates:", error.message);
+      primaryDiscoveryError = error;
+      console.warn("CMC market discovery unavailable; using venue fallback:", error.message);
     }
-  } catch (error) {
-    primaryDiscoveryError = error;
-    console.warn("CMC market discovery unavailable; using Binance fallback:", error.message);
+  } else {
+    primaryDiscoveryError = new Error("CMC market discovery disabled; using venue discovery");
+    console.info("CMC market discovery disabled; using venue discovery");
   }
 
   let symbols = primarySymbols;
