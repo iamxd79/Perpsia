@@ -9,6 +9,7 @@ const {
 } = require("../services/signalQuality");
 const {
   evaluateSignalOutcomes,
+  getSignalQualityHealth,
   getSignalQualityReport,
   initializeSignalQuality,
   recordQualitySignal,
@@ -112,5 +113,19 @@ test("quality store records fields and evaluates real candle outcomes", async ()
   const report = getSignalQualityReport({ lookbackDays: 365 });
   assert.equal(report.status, "insufficient_observations");
   assert.equal(report.horizons["24h"].statistics, null);
+
+  const previousMinimum = process.env.PERPSIA_MIN_QUALITY_OBSERVATIONS;
+  process.env.PERPSIA_MIN_QUALITY_OBSERVATIONS = "1";
+  try {
+    const readyReport = getSignalQualityReport({ lookbackDays: 365 });
+    const health = getSignalQualityHealth();
+    assert.equal(readyReport.status, "ready");
+    assert.equal(readyReport.dataStatus, "real_observations");
+    assert.equal(health.status, "ready");
+    assert.equal(health.evaluated24h, 1);
+  } finally {
+    if (previousMinimum === undefined) delete process.env.PERPSIA_MIN_QUALITY_OBSERVATIONS;
+    else process.env.PERPSIA_MIN_QUALITY_OBSERVATIONS = previousMinimum;
+  }
   database.close();
 });

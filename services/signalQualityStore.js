@@ -514,7 +514,7 @@ function getSignalQualityReport(options = {}) {
       "SELECT q.*, s.symbol, s.signal_time, s.direction, s.score, s.confidence_score,",
       "s.signal_type, s.market_regime, s.providers_json, s.evidence_groups_json",
       "FROM signal_quality_outcomes q JOIN signal_quality_signals s ON s.id = q.signal_id",
-      "WHERE q.horizon_key = ? AND s.signal_time >= ? AND q.status = 'EVALUATED'",
+      "WHERE q.horizon_key = ? AND s.signal_time >= ? AND q.status NOT IN ('PENDING', 'NO_DATA')",
       "ORDER BY s.signal_time ASC",
     ].join(String.fromCharCode(10))).all(horizon.key, cutoff);
   }
@@ -541,7 +541,7 @@ function getSignalQualityReport(options = {}) {
   const strongest = combinations.filter((item) => item.observations >= minimum).sort((a, b) => (b.winRate || 0) - (a.winRate || 0)).slice(0, 5);
   const weakest = combinations.filter((item) => item.observations >= minimum).sort((a, b) => (a.winRate || 0) - (b.winRate || 0)).slice(0, 5);
   return {
-    status: signals.length >= minimum ? "ready" : "insufficient_observations",
+    status: selectedRows.length >= minimum ? "ready" : "insufficient_observations",
     minimumObservations: minimum,
     lookbackDays: days,
     totalSignals: signals.length,
@@ -552,7 +552,7 @@ function getSignalQualityReport(options = {}) {
     strongestEvidenceCombinations: strongest,
     weakestEvidenceCombinations: weakest,
     generatedAt: new Date().toISOString(),
-    dataStatus: signals.length >= minimum ? "real_observations" : "collecting_real_observations",
+    dataStatus: selectedRows.length >= minimum ? "real_observations" : "collecting_real_observations",
     methodology: "Outcomes use public 1h futures candles. The same candle is resolved conservatively as stop before targets when both are touched. No result is estimated when candles are unavailable.",
   };
 }
@@ -561,10 +561,10 @@ function getSignalQualityHealth() {
   const store = requireDb();
   const minimum = getMinimumObservations();
   const totalSignals = store.prepare("SELECT COUNT(*) AS count FROM signal_quality_signals").get().count;
-  const evaluated24h = store.prepare("SELECT COUNT(*) AS count FROM signal_quality_outcomes WHERE horizon_key = '24h' AND status = 'EVALUATED'").get().count;
-  const lastEvaluation = store.prepare("SELECT MAX(evaluated_at) AS value FROM signal_quality_outcomes WHERE status = 'EVALUATED'").get().value;
+  const evaluated24h = store.prepare("SELECT COUNT(*) AS count FROM signal_quality_outcomes WHERE horizon_key = '24h' AND status NOT IN ('PENDING', 'NO_DATA')").get().count;
+  const lastEvaluation = store.prepare("SELECT MAX(evaluated_at) AS value FROM signal_quality_outcomes WHERE status NOT IN ('PENDING', 'NO_DATA')").get().value;
   return {
-    status: totalSignals >= minimum ? "ready" : totalSignals ? "collecting" : "no_observations",
+    status: evaluated24h >= minimum ? "ready" : totalSignals ? "collecting" : "no_observations",
     totalSignals,
     evaluated24h,
     minimumObservations: minimum,
