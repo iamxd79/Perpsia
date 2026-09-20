@@ -51,6 +51,15 @@ async function createCmcClient() {
   return client;
 }
 
+function boundedTimeout(value, fallback) {
+  const parsed = Number(value);
+  return Math.min(Math.max(Number.isFinite(parsed) ? parsed : fallback, 10000), 300000);
+}
+
+function cmcRetries() {
+  const parsed = Number(process.env.CMC_REQUEST_RETRIES ?? 1);
+  return Math.min(Math.max(Number.isFinite(parsed) ? parsed : 1, 0), 2);
+}
 function providerError(result) {
   const textBlock = result?.content?.find((item) => item.type === "text");
   const error = new Error(
@@ -108,9 +117,10 @@ async function findSkill(query, topK = 5) {
           query,
           top_k: topK,
         },
-        180000
+        boundedTimeout(process.env.CMC_FIND_SKILL_TIMEOUT_MS, 60000)
       ),
       {
+        retries: cmcRetries(),
         onRetry: (detail) => retryLogger(skill, detail),
       }
     );
@@ -143,9 +153,10 @@ async function executeSkill(uniqueName, parameters = {}) {
           unique_name: skill,
           parameters,
         },
-        300000
+        boundedTimeout(process.env.CMC_SKILL_TIMEOUT_MS, 60000)
       ),
       {
+        retries: cmcRetries(),
         onRetry: (detail) => retryLogger(skill, detail),
       }
     );
