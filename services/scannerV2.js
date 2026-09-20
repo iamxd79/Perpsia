@@ -3611,17 +3611,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
         }
       }
 
-      try {
-        const fallbackSymbols = await discoverBybitPerpetualSymbols({
-          limit: MAX_SCAN_CANDIDATES,
-          timeoutMs: options.discoveryTimeoutMs || 8000,
-        });
-        symbols = [...new Set([...symbols, ...fallbackSymbols])].slice(0, MAX_SCAN_CANDIDATES);
-        usedMarketDiscoveryFallback = symbols.length > primarySymbols.length;
-        console.warn("Bybit market discovery fallback used:", symbols.length);
-      } catch (bybitError) {
-        console.warn("Bybit market discovery fallback unavailable:", bybitError.message);
-      }
+
 
     }
   }
@@ -4026,11 +4016,21 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
-      const orderbook = await executeSkillWithFallback(
-        "review_perp_orderbook_pressure",
-        orderbookParams,
-        onProgress
-      );
+      let orderbook = {};
+      try {
+        orderbook = await executeSkillWithFallback(
+          "review_perp_orderbook_pressure",
+          orderbookParams,
+          onProgress
+        );
+      } catch (error) {
+        console.warn("CMC orderbook evidence unavailable for " + symbol + ":", error.message);
+        orderbook = {
+          status: "unavailable",
+          error: error.message,
+          evidenceQuality: "missing",
+        };
+      }
 
 
 
