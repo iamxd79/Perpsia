@@ -2746,7 +2746,7 @@ registerProvider({
   rateLimit: "public exchange limits; request weight applies",
   transport: "REST+WebSocket",
   cacheTtlMs: 15000,
-  collect: fetchBinance,
+  collect: (context = {}) => fetchBinance(context.symbol, context),
 });
 
 
@@ -2820,7 +2820,7 @@ registerProvider({
   rateLimit: "public exchange limits",
   transport: "REST+WebSocket",
   cacheTtlMs: 15000,
-  collect: fetchBybit,
+  collect: (context = {}) => fetchBybit(context.symbol, context),
 });
 
 
@@ -2894,7 +2894,7 @@ registerProvider({
   rateLimit: "public exchange limits; IP based",
   transport: "REST+WebSocket",
   cacheTtlMs: 15000,
-  collect: fetchOkx,
+  collect: (context = {}) => fetchOkx(context.symbol, context),
 });
 
 
@@ -2968,7 +2968,7 @@ registerProvider({
   rateLimit: "public info endpoint limits",
   transport: "REST+WebSocket",
   cacheTtlMs: 15000,
-  collect: fetchHyperliquid,
+  collect: (context = {}) => fetchHyperliquid(context.symbol, context),
 });
 
 registerProvider({
@@ -3078,7 +3078,7 @@ registerProvider({
   rateLimit: "300 requests/min for pair/search endpoints",
   transport: "REST",
   cacheTtlMs: 60000,
-  collect: fetchDexScreener,
+  collect: (context = {}) => fetchDexScreener(context.symbol, context),
 });
 
 
@@ -3152,7 +3152,7 @@ registerProvider({
   rateLimit: "approximately 10 requests/min on public API",
   transport: "REST",
   cacheTtlMs: 60000,
-  collect: fetchGeckoTerminal,
+  collect: (context = {}) => fetchGeckoTerminal(context.symbol, context),
 });
 
 
@@ -3226,7 +3226,7 @@ registerProvider({
   rateLimit: "public API; no published hard limit",
   transport: "REST",
   cacheTtlMs: 300000,
-  collect: fetchAlternative,
+  collect: (context = {}) => fetchAlternative(context.symbol, context),
 });
 
 
@@ -3300,7 +3300,7 @@ registerProvider({
   rateLimit: "FRED account/API limits",
   transport: "REST",
   cacheTtlMs: 900000,
-  collect: fetchFred,
+  collect: (context = {}) => fetchFred(context.symbol, context),
 });
 
 
@@ -3374,7 +3374,7 @@ registerProvider({
   rateLimit: "public API limits",
   transport: "REST",
   cacheTtlMs: 900000,
-  collect: fetchGoPlus,
+  collect: (context = {}) => fetchGoPlus(context.symbol, context),
 });
 
 
@@ -3448,7 +3448,7 @@ registerProvider({
   rateLimit: "public API limits",
   transport: "REST",
   cacheTtlMs: 900000,
-  collect: fetchHoneypot,
+  collect: (context = {}) => fetchHoneypot(context.symbol, context),
 });
 
 
@@ -3522,7 +3522,7 @@ registerProvider({
   rateLimit: "60 requests/hour unauthenticated; higher with token",
   transport: "REST",
   cacheTtlMs: 900000,
-  collect: fetchGithub,
+  collect: (context = {}) => fetchGithub(context.symbol, context),
 });
 
 
