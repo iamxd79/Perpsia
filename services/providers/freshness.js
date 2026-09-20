@@ -26,6 +26,8 @@ function providerClass(record = {}) {
   const metadataClass = String(record.metadata?.freshnessClass || "").toLowerCase();
 
   if (metadataClass && FRESHNESS_THRESHOLDS_MS[metadataClass]) return metadataClass;
+  if (String(record.sourceType || "").toLowerCase() === "websocket" && record.orderbook) return "orderbook";
+  if (marketType.includes("perp") || marketType.includes("future") || record.funding !== null && record.funding !== undefined || record.openInterest !== null && record.openInterest !== undefined) return "derivatives";
   if (record.orderbook) return "orderbook";
   if (provider === "goplus" || provider === "honeypot" || record.securityRisk !== null && record.securityRisk !== undefined) return "security";
   if (provider === "alternative" || provider === "fred" || marketType.includes("macro")) return "macro";
@@ -33,7 +35,6 @@ function providerClass(record = {}) {
   if (provider === "grok" || marketType.includes("research")) return "research";
   if (marketType.includes("dex") || provider === "dexscreener" || provider === "geckoterminal") return "dex";
   if (marketType.includes("technical") || provider === "binance_technical" || provider === "smc") return "technical";
-  if (marketType.includes("perp") || marketType.includes("future") || record.funding !== null && record.funding !== undefined || record.openInterest !== null && record.openInterest !== undefined) return "derivatives";
   if (record.price !== null && record.price !== undefined) return "price";
   return "default";
 }

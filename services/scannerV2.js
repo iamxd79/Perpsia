@@ -678,7 +678,7 @@ function readStructuredValue(payloads, aliases) {
 
   for (const object of collectObjects(payloads)) {
     for (const [key, value] of Object.entries(object)) {
-      if (wanted.has(normalizeKey(key))) {
+      if (wanted.has(normalizeKey(key)) && value !== null && value !== undefined && value !== "") {
         return value;
       }
     }

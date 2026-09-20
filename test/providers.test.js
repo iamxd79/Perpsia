@@ -26,6 +26,21 @@ test("normalizes shared evidence without inventing missing fields", () => {
   assert.equal(evidence.status, "ok");
 });
 
+test("composite perpetual evidence is not made stale by the orderbook TTL", () => {
+  const evidence = normalizeEvidence({
+    provider: "binance",
+    symbol: "BTC",
+    marketType: "perpetual",
+    timestamp: Date.now() - 10_000,
+    price: 100,
+    funding: 0.0001,
+    openInterest: 1000,
+    orderbook: { bidVolume: 60, askVolume: 40 },
+  });
+  assert.equal(evidence.freshness.freshnessClass, "derivatives");
+  assert.equal(evidence.usable, true);
+});
+
 test("provider failures are isolated and exposed as health state", async () => {
   registerProvider({
     id: "fixture-failure",
