@@ -174,6 +174,17 @@ async function runScheduledScan({ bot, chatId, venue }) {
   const configuredScanTimeoutMs = Number(process.env.PERPSIA_SCHEDULER_SCAN_TIMEOUT_MS || 12 * 60 * 1000);
   const scanTimeoutMs = Math.min(Math.max(Number.isFinite(configuredScanTimeoutMs) ? configuredScanTimeoutMs : 12 * 60 * 1000, 60 * 1000), 30 * 60 * 1000);
   const scanDeadlineAt = Date.now() + scanTimeoutMs;
+  const runStartedAt = schedulerState.lastRunAt;
+  let scanTimedOut = false;
+  const scanWatchdog = setTimeout(() => {
+    if (schedulerState.lastRunAt !== runStartedAt || schedulerState.lastRunStatus !== "running") return;
+    scanTimedOut = true;
+    schedulerState.lastRunStatus = "timeout";
+    schedulerState.lastError = "Scheduled scan exceeded " + scanTimeoutMs + "ms";
+    schedulerState.lastProgressAt = new Date().toISOString();
+    schedulerState.lastProgress = { percent: schedulerState.lastProgress?.percent || 0, stage: "timeout", message: schedulerState.lastError };
+    unlockScan();
+  }, scanTimeoutMs);
 
   let loading = null;
 
@@ -207,6 +218,8 @@ Current stage:
 ${progress.stage}`
       );
     }, { deadlineAt: scanDeadlineAt });
+
+    if (scanTimedOut) throw new Error("Scheduled scan completed after watchdog timeout.");
 
 
 
@@ -303,6 +316,7 @@ Checking memory and alert conditions...`
 
     console.log(`[${getNow()}] Scheduled scan completed. Alerts: ${alertCount}`);
   } catch (error) {
+    if (scanTimedOut) return;
     schedulerState.lastRunStatus = "error";
     schedulerState.lastError = String(error?.message || error);
     console.error("Scheduled scan failed:", error);
@@ -321,6 +335,7 @@ Reason:
 ${error.message}`
     );
   } finally {
+    clearTimeout(scanWatchdog);
     unlockScan();
   }
 }
