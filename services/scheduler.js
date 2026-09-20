@@ -303,6 +303,32 @@ Checking memory and alert conditions...`
       neutral: result.neutral.length,
       errors: result.errors.length,
     };
+    const diagnosticSignals = [
+      ...result.longs,
+      ...result.shorts,
+      ...result.watchlist,
+      ...result.neutral,
+    ]
+      .slice()
+      .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))
+      .slice(0, 10)
+      .map((signal) => ({
+        symbol: signal.symbol,
+        category: signal.category,
+        direction: signal.direction,
+        score: signal.score,
+        marketState: signal.marketState,
+        hasCoreData: signal.hasCoreData,
+        analysisDepth: signal.analysisDepth,
+        confirmationNeeded: Array.isArray(signal.confirmationNeeded)
+          ? signal.confirmationNeeded.slice(0, 4)
+          : [],
+        reasons: Array.isArray(signal.reasons) ? signal.reasons.slice(0, 4) : [],
+      }));
+    schedulerState.lastScanDiagnostics = {
+      candidateCount: result.longs.length + result.shorts.length + result.watchlist.length + result.neutral.length,
+      topCandidates: diagnosticSignals,
+    };
 
     if (alertCount === 0) {
       await withTelegramTimeout(bot.sendMessage(chatId, formatSilentReport(result, alertCount)), "Telegram silent report");
@@ -357,6 +383,7 @@ let schedulerState = {
   lastProgressAt: null,
   lastProgress: null,
   lastSignalCounts: null,
+  lastScanDiagnostics: null,
 };
 
 function getSchedulerHealth() {
@@ -374,6 +401,7 @@ function getSchedulerHealth() {
     lastProgressAt: schedulerState.lastProgressAt,
     lastProgress: schedulerState.lastProgress,
     lastSignalCounts: schedulerState.lastSignalCounts,
+    lastScanDiagnostics: schedulerState.lastScanDiagnostics,
   };
 }
 
