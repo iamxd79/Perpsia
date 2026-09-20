@@ -144,7 +144,10 @@ async function runScheduledScan({ bot, chatId, venue }) {
 
 
 
-  console.log(`[${getNow()}] Scheduled scan started.`);
+  schedulerState.lastRunAt = new Date().toISOString();
+  schedulerState.lastRunStatus = "running";
+  schedulerState.lastError = null;
+  console.log("Scheduled scan started.");
 
 
 
@@ -252,7 +255,15 @@ Checking memory and alert conditions...`
 
 
     recordScan("scheduled", "success");
-
+    schedulerState.lastRunStatus = "success";
+    schedulerState.lastError = null;
+    schedulerState.lastSignalCounts = {
+      long: result.longs.length,
+      short: result.shorts.length,
+      watchlist: result.watchlist.length,
+      neutral: result.neutral.length,
+      errors: result.errors.length,
+    };
 
     if (alertCount === 0) {
       await bot.sendMessage(chatId, formatSilentReport(result, alertCount));
@@ -266,6 +277,8 @@ Checking memory and alert conditions...`
 
     console.log(`[${getNow()}] Scheduled scan completed. Alerts: ${alertCount}`);
   } catch (error) {
+    schedulerState.lastRunStatus = "error";
+    schedulerState.lastError = String(error?.message || error);
     console.error("Scheduled scan failed:", error);
     recordScan("scheduled", "error");
 
@@ -295,6 +308,10 @@ let schedulerState = {
   startedAt: null,
   intervalMs: null,
   venue: null,
+  lastRunAt: null,
+  lastRunStatus: null,
+  lastError: null,
+  lastSignalCounts: null,
 };
 
 function getSchedulerHealth() {
@@ -304,6 +321,10 @@ function getSchedulerHealth() {
     startedAt: schedulerState.startedAt,
     intervalMs: schedulerState.intervalMs,
     venue: schedulerState.venue,
+    lastRunAt: schedulerState.lastRunAt,
+    lastRunStatus: schedulerState.lastRunStatus,
+    lastError: schedulerState.lastError,
+    lastSignalCounts: schedulerState.lastSignalCounts,
   };
 }
 
