@@ -1462,7 +1462,8 @@ async function fetchBybit(symbol, options = {}) {
   return {
     symbol: asset,
     marketType: "perpetual",
-    timestamp: number(oiList[0]?.timestamp) || Date.now(),
+    // The OI endpoint timestamp can lag by minutes; this is a composite REST snapshot.
+    timestamp: Date.now(),
     price,
     volume: number(ticker?.turnover24h) || number(ticker?.volume24h),
     openInterest: currentOi,
