@@ -307,6 +307,19 @@ const {
 } = require("./services/telemetry");
 const { cmcCircuitBreaker } = require("./services/resilience");
 
+
+function getBuildHealth() {
+  return {
+    commit: process.env.RENDER_GIT_COMMIT || process.env.RENDER_GIT_COMMIT_SHA || null,
+    node: process.version,
+    scanLimits: {
+      maxCandidates: Number(process.env.PERPSIA_MAX_SCAN_CANDIDATES || 54),
+      deepAnalysisCandidates: Number(process.env.PERPSIA_DEEP_ANALYSIS_CANDIDATES || 4),
+      aiValidationCandidates: Number(process.env.PERPSIA_AI_VALIDATION_CANDIDATES || 12),
+    },
+  };
+}
+
 function getIntegrationHealth() {
   const has = (name) => Boolean(String(process.env[name] || "").trim());
   return {
@@ -531,6 +544,7 @@ async function handleHttpRequest(req, res) {
       res.end(JSON.stringify({
         status: degraded ? "degraded" : "ok",
         service: "Perpsia Terminal",
+        build: getBuildHealth(),
         storage: getStorageInfo(),
         signal_quality: getSignalQualityHealth(),
         scheduler: getSchedulerHealth(),
