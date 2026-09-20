@@ -298,6 +298,7 @@ PerpsIA now calculates a deterministic technical context from public Binance fut
 ### Grok research layer
 
 Grok is an optional secondary research source. When enabled with `PERPSIA_ENABLE_GROK_RESEARCH=true` and `XAI_API_KEY`, PerpsIA can use xAI Web Search and X Search to collect fresh, cited catalysts, narratives, and sentiment. Grok cannot create a direction, entry, stop, target, or actionable signal by itself. Structured market data and deterministic PerpsIA rules remain authoritative, and uncited or unavailable research is ignored for confidence.
+Grok and OpenAI validation run only after usable structured market evidence exists. Wide scans can expose early LONG/SHORT candidates, while the models provide bounded secondary confirmation; they cannot bypass the actionable score, data-quality, security, or risk gates. `PERPSIA_AI_VALIDATION_CANDIDATES` limits the number of data-complete candidates sent to either model per scan.
 
 ---
 
@@ -504,7 +505,7 @@ Used for:
 
 
 
-OpenAI should not independently create or approve trading decisions.
+OpenAI may propose LONG, SHORT, or NEUTRAL from the supplied evidence and current web context, but PerpsIA's deterministic scoring and safety gates remain authoritative; OpenAI cannot independently approve an actionable trade.
 
 
 
