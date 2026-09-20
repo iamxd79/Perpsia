@@ -545,6 +545,19 @@ async function executeSkillWithFallback(skillName, params, onProgress) {
 
 
 
+async function executeOptionalSkill(skillName, params, onProgress) {
+  try {
+    return await executeSkillWithFallback(skillName, params, onProgress);
+  } catch (error) {
+    console.warn(`Optional CMC skill unavailable: ${skillName}`, error.message);
+    return {
+      status: "unavailable",
+      error: error.message,
+      evidenceQuality: "missing",
+    };
+  }
+}
+
 function normalizeKey(key) {
   return String(key || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
@@ -3859,7 +3872,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
-      const accumulation = await executeSkillWithFallback(
+      const accumulation = await executeOptionalSkill(
         "detect_accumulation_breakout_transition",
         accumParams,
         onProgress
@@ -3922,7 +3935,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
-      const perp = await executeSkillWithFallback(
+      const perp = await executeOptionalSkill(
         "perp_contract_analysis",
         perpParams,
         onProgress
@@ -4156,7 +4169,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
 
-      const mtf = await executeSkillWithFallback(
+      const mtf = await executeOptionalSkill(
         "analyze_multi_timeframe_trend_alignment",
         mtfParams,
         onProgress
@@ -4488,7 +4501,7 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
-  const accumulation = await executeSkillWithFallback(
+  const accumulation = await executeOptionalSkill(
     "detect_accumulation_breakout_transition",
     accumParams,
     onProgress
@@ -4551,7 +4564,7 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
-  const perp = await executeSkillWithFallback(
+  const perp = await executeOptionalSkill(
     "perp_contract_analysis",
     perpParams,
     onProgress
@@ -4767,7 +4780,7 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
 
 
 
-  const mtf = await executeSkillWithFallback(
+  const mtf = await executeOptionalSkill(
     "analyze_multi_timeframe_trend_alignment",
     mtfParams,
     onProgress
