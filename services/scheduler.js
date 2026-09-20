@@ -308,6 +308,8 @@ let schedulerState = {
   startedAt: null,
   intervalMs: null,
   venue: null,
+  initialDelayMs: null,
+  initialRunScheduled: false,
   lastRunAt: null,
   lastRunStatus: null,
   lastError: null,
@@ -321,6 +323,8 @@ function getSchedulerHealth() {
     startedAt: schedulerState.startedAt,
     intervalMs: schedulerState.intervalMs,
     venue: schedulerState.venue,
+    initialDelayMs: schedulerState.initialDelayMs,
+    initialRunScheduled: schedulerState.initialRunScheduled,
     lastRunAt: schedulerState.lastRunAt,
     lastRunStatus: schedulerState.lastRunStatus,
     lastError: schedulerState.lastError,
@@ -329,19 +333,39 @@ function getSchedulerHealth() {
 }
 
 function stopScheduler() {
-  if (!schedulerTimer) return false;
-  clearInterval(schedulerTimer);
-  schedulerTimer = null;
-  return true;
+  const wasRunning = Boolean(schedulerTimer || schedulerStartTimer);
+  if (schedulerStartTimer) {
+    clearTimeout(schedulerStartTimer);
+    schedulerStartTimer = null;
+  }
+  if (schedulerTimer) {
+    clearInterval(schedulerTimer);
+    schedulerTimer = null;
+  }
+  schedulerState = { ...schedulerState, initialRunScheduled: false };
+  return wasRunning;
 }
 
-function startScheduler({ bot, chatId, intervalMs = 4 * 60 * 60 * 1000, venue }) {
+function startScheduler({
+  bot,
+  chatId,
+  intervalMs = 4 * 60 * 60 * 1000,
+  initialDelayMs = Number(process.env.PERPSIA_SCHEDULER_INITIAL_DELAY_MS || 30000),
+  venue,
+}) {
   if (!bot) {
     throw new Error("Scheduler requires bot instance.");
   }
 
   if (!chatId) {
-    schedulerState = { ...schedulerState, configured: false, intervalMs, venue: venue || null };
+    schedulerState = {
+      ...schedulerState,
+      configured: false,
+      intervalMs,
+      venue: venue || null,
+      initialDelayMs: null,
+      initialRunScheduled: false,
+    };
     console.log("Scheduler not started: TELEGRAM_CHAT_ID missing.");
     return { started: false, reason: "missing_chat_id" };
   }
@@ -351,13 +375,31 @@ function startScheduler({ bot, chatId, intervalMs = 4 * 60 * 60 * 1000, venue })
     return { started: false, reason: "already_started", stop: stopScheduler };
   }
 
-  console.log(`Perpsia smart alert scheduler started. Interval: ${intervalMs}ms`);
+  const parsedInitialDelayMs = Number(initialDelayMs);
+  const safeInitialDelayMs = Math.min(
+    Math.max(Number.isFinite(parsedInitialDelayMs) ? parsedInitialDelayMs : 30000, 0),
+    5 * 60 * 1000
+  );
+
+  console.log(
+    `Perpsia smart alert scheduler started. Initial scan in ${safeInitialDelayMs}ms; interval: ${intervalMs}ms`
+  );
   schedulerState = {
     configured: true,
     startedAt: new Date().toISOString(),
     intervalMs,
     venue: venue || null,
+    initialDelayMs: safeInitialDelayMs,
+    initialRunScheduled: true,
   };
+  schedulerStartTimer = setTimeout(() => {
+    schedulerStartTimer = null;
+    schedulerState = { ...schedulerState, initialRunScheduled: false };
+    void runScheduledScan({ bot, chatId, venue }).catch((error) => {
+      console.error("Initial scheduled scan runner failed:", error.message);
+    });
+  }, safeInitialDelayMs);
+  schedulerStartTimer.unref?.();
   schedulerTimer = setInterval(() => {
     void runScheduledScan({ bot, chatId, venue }).catch((error) => {
       console.error("Scheduled scan runner failed:", error.message);
