@@ -64,13 +64,30 @@ function progressBar(percent) {
 
 
 
+async function withTelegramTimeout(promise, label) {
+  const timeoutMs = Math.min(Math.max(Number(process.env.PERPSIA_TELEGRAM_TIMEOUT_MS || 30000), 5000), 120000);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(label + " timed out after " + timeoutMs + "ms");
+      error.code = "TELEGRAM_TIMEOUT";
+      reject(error);
+    }, timeoutMs);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 async function safeEditMessage(bot, chatId, messageId, text) {
   if (!messageId) return;
   try {
-    await bot.editMessageText(text, {
+    await withTelegramTimeout(bot.editMessageText(text, {
       chat_id: chatId,
       message_id: messageId,
-    });
+    }), "Telegram edit");
   } catch {
     // ignore duplicate edit errors
   }
@@ -156,14 +173,14 @@ async function runScheduledScan({ bot, chatId, venue }) {
   let loading = null;
 
   try {
-    loading = await bot.sendMessage(
+    loading = await withTelegramTimeout(bot.sendMessage(
     chatId,
     `🤖 PERPSIA AUTONOMOUS SCAN
 
 ${progressBar(5)} 5%
 
 Booting scheduled market intelligence scan...`
-  );
+  ), "Telegram initial progress");
 
 
 
@@ -241,7 +258,7 @@ Checking memory and alert conditions...`
 
 
 
-      await bot.sendMessage(chatId, alertMessage);
+      await withTelegramTimeout(bot.sendMessage(chatId, alertMessage), "Telegram alert");
 
 
 
@@ -269,7 +286,7 @@ Checking memory and alert conditions...`
     };
 
     if (alertCount === 0) {
-      await bot.sendMessage(chatId, formatSilentReport(result, alertCount));
+      await withTelegramTimeout(bot.sendMessage(chatId, formatSilentReport(result, alertCount)), "Telegram silent report");
     }
 
 
