@@ -290,6 +290,22 @@ ${error.message}`
 
 
 let schedulerTimer = null;
+let schedulerState = {
+  configured: false,
+  startedAt: null,
+  intervalMs: null,
+  venue: null,
+};
+
+function getSchedulerHealth() {
+  return {
+    configured: schedulerState.configured,
+    running: Boolean(schedulerTimer),
+    startedAt: schedulerState.startedAt,
+    intervalMs: schedulerState.intervalMs,
+    venue: schedulerState.venue,
+  };
+}
 
 function stopScheduler() {
   if (!schedulerTimer) return false;
@@ -304,6 +320,7 @@ function startScheduler({ bot, chatId, intervalMs = 4 * 60 * 60 * 1000, venue })
   }
 
   if (!chatId) {
+    schedulerState = { ...schedulerState, configured: false, intervalMs, venue: venue || null };
     console.log("Scheduler not started: TELEGRAM_CHAT_ID missing.");
     return { started: false, reason: "missing_chat_id" };
   }
@@ -314,6 +331,12 @@ function startScheduler({ bot, chatId, intervalMs = 4 * 60 * 60 * 1000, venue })
   }
 
   console.log(`Perpsia smart alert scheduler started. Interval: ${intervalMs}ms`);
+  schedulerState = {
+    configured: true,
+    startedAt: new Date().toISOString(),
+    intervalMs,
+    venue: venue || null,
+  };
   schedulerTimer = setInterval(() => {
     void runScheduledScan({ bot, chatId, venue }).catch((error) => {
       console.error("Scheduled scan runner failed:", error.message);
@@ -326,5 +349,6 @@ function startScheduler({ bot, chatId, intervalMs = 4 * 60 * 60 * 1000, venue })
 module.exports = {
   startScheduler,
   stopScheduler,
+  getSchedulerHealth,
   runScheduledScan,
 };

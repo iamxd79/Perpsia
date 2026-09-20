@@ -248,6 +248,7 @@ const {
 const {
   startScheduler,
   stopScheduler,
+  getSchedulerHealth,
 } = require("./services/scheduler");
 
 
@@ -532,6 +533,7 @@ async function handleHttpRequest(req, res) {
         service: "Perpsia Terminal",
         storage: getStorageInfo(),
         signal_quality: getSignalQualityHealth(),
+        scheduler: getSchedulerHealth(),
         integrations: getIntegrationHealth(),
         onchain: {
           storage: getOnchainStoreHealth(),
@@ -719,6 +721,7 @@ async function handleHttpRequest(req, res) {
         integrations: getIntegrationHealth(),
         storage: getStorageInfo(),
         signal_quality: getSignalQualityHealth(),
+        scheduler: getSchedulerHealth(),
         onchain: {
           storage: getOnchainStoreHealth(),
           alchemy: getAlchemyHealth(),
