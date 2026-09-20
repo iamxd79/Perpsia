@@ -75,7 +75,7 @@ async function validateSignal({ symbol, signal = {}, evidence = [], options = {}
             role: "system",
             content: [{
               type: "input_text",
-              text: "You are PerpsIA's independent signal validator. Use the supplied structured evidence as the primary source of truth. You may use web search only to check current context and catalysts. Propose LONG, SHORT, or NEUTRAL. Never invent prices, entries, targets, stops, or facts. A directional proposal requires measurable evidence and must state missing evidence. Return only JSON.",
+              text: "You are PerpsIA's independent signal validator. Use the supplied structured evidence as the primary source of truth. You must use web search to check current context and catalysts before proposing LONG, SHORT, or NEUTRAL. Never invent prices, entries, targets, stops, or facts. A directional proposal requires measurable evidence and must state missing evidence. Return only JSON.",
             }],
           },
           {
@@ -98,9 +98,12 @@ async function validateSignal({ symbol, signal = {}, evidence = [], options = {}
           },
         ],
         tools: [{ type: "web_search" }],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
+        tool_choice: "required",
+        store: false,
+        include: ["web_search_call.action.sources"],
+        text: {
+          format: {
+            type: "json_schema",
             name: "perpsia_openai_signal_validation",
             strict: true,
             schema: {
