@@ -30,6 +30,7 @@ const { routeProviders, calculateSignalConfidence } = require("./signalQuality")
 const { analyzeTechnicalContext } = require("./technicalAnalysis");
 const { buildFundamentalContext } = require("./fundamentalAnalysis");
 const { researchAsset } = require("./grokResearch");
+const { validateSignal } = require("./openaiSignalValidation");
 
 
 
@@ -2188,6 +2189,7 @@ function classifyCandidate(symbol, packs) {
   const smc = technical?.smc || packs.smc || null;
   const fundamental = packs.fundamental || null;
   const research = packs.research || null;
+  const openaiValidation = packs.openaiValidation || null;
   const marketEvidence = Array.isArray(packs.marketEvidence)
     ? packs.marketEvidence
     : Array.isArray(packs.marketEvidence?.records)
@@ -2593,6 +2595,37 @@ ${mtfText}
 
 
 
+
+
+  const modelValidations = [
+    research?.status === "available" && Number(research.confidence || 0) >= 0.6 && Number(research.citationCount || 0) > 0 ? research : null,
+    openaiValidation?.status === "available" && Number(openaiValidation.confidence || 0) >= 0.6 ? openaiValidation : null,
+  ].filter(Boolean);
+  const longVotes = modelValidations.filter((item) => ["BULLISH", "LONG"].includes(String(item.direction || "").toUpperCase())).length;
+  const shortVotes = modelValidations.filter((item) => ["BEARISH", "SHORT"].includes(String(item.direction || "").toUpperCase())).length;
+  if (hasCoreData && direction === "Neutral" && longVotes >= 1 && shortVotes === 0) {
+    direction = "Bullish";
+    score += 12;
+    reasons.push("AI validation proposes LONG from the supplied evidence.");
+  } else if (hasCoreData && direction === "Neutral" && shortVotes >= 1 && longVotes === 0) {
+    direction = "Bearish";
+    score += 12;
+    reasons.push("AI validation proposes SHORT from the supplied evidence.");
+  }
+  for (const validation of modelValidations) {
+    const modelDirection = String(validation.direction || "").toUpperCase();
+    const aligned = (direction === "Bullish" && ["BULLISH", "LONG"].includes(modelDirection)) ||
+      (direction === "Bearish" && ["BEARISH", "SHORT"].includes(modelDirection));
+    const opposed = (direction === "Bullish" && ["BEARISH", "SHORT"].includes(modelDirection)) ||
+      (direction === "Bearish" && ["BULLISH", "LONG"].includes(modelDirection));
+    if (aligned) {
+      score += validation.provider === "openai" ? 8 : 6;
+      reasons.push((validation.provider === "openai" ? "OpenAI" : "Grok") + " independently validates the direction.");
+    } else if (opposed) {
+      score -= validation.provider === "openai" ? 8 : 6;
+      conflicts.push((validation.provider === "openai" ? "OpenAI" : "Grok") + " challenges the deterministic direction.");
+    }
+  }
 
   if (isEarly) {
     score += 20;
@@ -3375,6 +3408,7 @@ ${mtfText}
     smc,
     fundamental,
     research,
+    openaiValidation,
     marketEvidence,
     crossSource,
 
@@ -4215,6 +4249,12 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
         evidence: evidenceRecords,
         options: { enabled: options.enableGrokResearch === true },
       });
+      const openaiValidation = await validateSignal({
+        symbol,
+        signal: baseSignal,
+        evidence: evidenceRecords,
+        options: { enabled: options.enableOpenAISignalValidation !== false },
+      });
 
       const result = {
         ...classifyCandidate(symbol, {
@@ -4228,6 +4268,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
           technical,
           fundamental,
           research,
+          openaiValidation,
           marketEvidence: evidenceRecords,
         }),
         venue,
@@ -4819,6 +4860,12 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
     evidence: evidenceRecords,
     options: { enabled: options.enableGrokResearch === true },
   });
+  const openaiValidation = await validateSignal({
+    symbol,
+    signal: baseSignal,
+    evidence: evidenceRecords,
+    options: { enabled: options.enableOpenAISignalValidation !== false },
+  });
 
   return {
     ...classifyCandidate(symbol, {
@@ -4832,6 +4879,7 @@ async function analyzeAsset(symbol, venue = "Binance", onProgress = async () => 
       technical,
       fundamental,
       research,
+      openaiValidation,
       marketEvidence: evidenceRecords,
     }),
     venue,
