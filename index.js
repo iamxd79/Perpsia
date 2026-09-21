@@ -308,6 +308,33 @@ const {
 const { cmcCircuitBreaker } = require("./services/resilience");
 
 
+function getPublicScanCandidates() {
+  const scheduler = getSchedulerHealth();
+  const diagnostics = scheduler?.lastScanDiagnostics;
+  const candidates = Array.isArray(diagnostics?.topCandidates) ? diagnostics.topCandidates : [];
+
+  return candidates
+    .filter((candidate) => candidate?.hasCoreData && /bullish|bearish|long|short/i.test(String(candidate.direction || "")))
+    .map((candidate, index) => {
+      const rawDirection = String(candidate.direction || "").toLowerCase();
+      const direction = /bearish|short/.test(rawDirection) ? "SHORT" : "LONG";
+      const category = String(candidate.category || "").toLowerCase();
+      return {
+        id: `early-${candidate.symbol || index}-${scheduler.lastRunAt || "scan"}`,
+        symbol: candidate.symbol,
+        signalType: `${direction} BIAS`,
+        direction,
+        category: category === "watchlist" ? "watchlist" : "early",
+        score: Number.isFinite(Number(candidate.score)) ? Number(candidate.score) : null,
+        lifecycleState: "DEVELOPING",
+        marketState: "Developing market conditions",
+        updatedAt: scheduler.lastRunAt || null,
+        reasons: Array.isArray(candidate.reasons) ? candidate.reasons.slice(0, 4) : [],
+        risks: Array.isArray(candidate.confirmationNeeded) ? candidate.confirmationNeeded.slice(0, 4) : [],
+        earlyCandidate: true,
+      };
+    });
+}
 function getBuildHealth() {
   return {
     commit: process.env.RENDER_GIT_COMMIT || process.env.RENDER_GIT_COMMIT_SHA || null,
@@ -593,16 +620,21 @@ async function handleHttpRequest(req, res) {
       });
       const timestamps = signals.map((signal) => Date.parse(signal.updatedAt || "")).filter(Number.isFinite);
       const updatedAt = timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null;
+      const schedulerHealth = getSchedulerHealth();
+      const candidates = getPublicScanCandidates();
+      const candidateUpdatedAt = schedulerHealth?.lastRunAt || null;
+      const feedUpdatedAt = updatedAt || candidateUpdatedAt;
       res.writeHead(200, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "public, max-age=15, s-maxage=15, stale-while-revalidate=30",
       });
       res.end(JSON.stringify({
         signals,
+        candidates,
         meta: {
-          source: "active-signals",
-          updatedAt,
-          stale: updatedAt ? Date.now() - Date.parse(updatedAt) > 6 * 60 * 60 * 1000 : false,
+          source: "active-signals-and-early-candidates",
+          updatedAt: feedUpdatedAt,
+          stale: feedUpdatedAt ? Date.now() - Date.parse(feedUpdatedAt) > 6 * 60 * 60 * 1000 : false,
         },
       }));
       return;

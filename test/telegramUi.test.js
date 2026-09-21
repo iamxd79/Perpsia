@@ -81,9 +81,9 @@ test("renders compact scan summary and drill-down buttons", () => {
     errors: [{ symbol: "DOGE" }],
   }, { venue: "OKX" });
   assert.match(summary, /2 strong setups/);
-  assert.match(summary, /1 watchlist/);
-  assert.match(summary, /2 filtered out/);
-  assert.match(summary, /1 data issues/);
+  assert.match(summary, /1 watchlist candidates/);
+  assert.match(summary, /2 developing \/ mixed/);
+  assert.match(summary, /1 data quality issues/);
   assert.deepEqual(
     scanSummaryKeyboard("OKX").inline_keyboard.flat().map((button) => button.text),
     ["View Top Setups", "View Watchlist", "Run Again"]

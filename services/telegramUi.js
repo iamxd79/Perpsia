@@ -227,10 +227,10 @@ function formatScanSummary(result = {}, options = {}) {
     options.venue ? cleanText(options.venue) : "",
     "",
     counts.strong + " strong setups",
-    counts.watchlist + " watchlist",
-    counts.filtered + " filtered out",
+    counts.watchlist + " watchlist candidates",
+    counts.filtered + " developing / mixed",
   ];
-  if (counts.errors > 0) lines.push(counts.errors + " data issues");
+  if (counts.errors > 0) lines.push(counts.errors + " data quality issues");
   return lines
     .filter((line, index) => line !== "" || (index > 0 && lines[index - 1] !== ""))
     .join("\n")
@@ -258,9 +258,14 @@ function compactReasons(values, limit = 3) {
 }
 
 function lifecycleLabel(signal, lifecycle) {
-  return cleanText(lifecycle?.stage || signal?.lifecycleStage || signal?.category || "MONITORING")
+  const raw = cleanText(lifecycle?.stage || signal?.lifecycleStage || signal?.category || "MONITORING")
     .toUpperCase()
     .replace(/[^A-Z0-9 /_-]/g, "");
+  if (raw === "NEUTRAL" || raw === "NEUTRAL / NO TRADE") return "DEVELOPING";
+  if (raw === "LONG") return "LONG CANDIDATE";
+  if (raw === "SHORT") return "SHORT CANDIDATE";
+  if (raw === "WATCHLIST") return "WATCHLIST";
+  return raw;
 }
 
 function walletIntelligenceSnapshot(signal = {}) {

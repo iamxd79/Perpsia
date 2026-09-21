@@ -119,19 +119,19 @@ function formatSilentReport(result, alertCount) {
 
   return `🤖 PERPSIA 4H SCAN COMPLETE
 
-No major alert triggered.
+No confirmed setup on this scan.
 
 Market Summary:
 Assets analyzed: ${total}
-Long signals: ${result.longs.length}
-Short signals: ${result.shorts.length}
-Watchlist: ${result.watchlist.length}
-Neutral / Avoid: ${result.neutral.length}
-Data issues: ${result.errors.length}
+Long candidates: ${result.longs.length}
+Short candidates: ${result.shorts.length}
+Watchlist candidates: ${result.watchlist.length}
+Developing conditions: ${result.neutral.length}
+Data quality issues: ${result.errors.length}
 
 Alerts sent: ${alertCount}
 
-Perpsia will keep monitoring.`;
+PerpsIA will keep tracking market development.`;
 }
 
 
