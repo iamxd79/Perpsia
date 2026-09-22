@@ -2527,6 +2527,16 @@ bot.onText(/^\/help(?:@\w+)?$/i, async (msg) => {
 });
 
 
+function paperPositionKeyboard(positionId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "🔄 Refresh PnL", callback_data: "paper_refresh:" + positionId, style: "primary" },
+        { text: "✕ Close Position", callback_data: "paper_close:" + positionId, style: "danger" },
+      ]],
+    },
+  };
+}
 function formatPrivateStats(chatId) {
   const stats = getUserStats(chatId);
   return [
@@ -2566,7 +2576,7 @@ async function handlePaperRequest(chatId, request) {
   if (request.action === "open") {
     try {
       const position = await openPaperPosition(chatId, request);
-      return bot.sendMessage(chatId, "✅ PAPER POSITION OPENED\n\n" + formatPaperPosition(position));
+      return bot.sendMessage(chatId, "✅ PAPER POSITION OPENED\n\n" + formatPaperPosition(position), paperPositionKeyboard(position.id));
     } catch (error) {
       return bot.sendMessage(chatId, "PAPER TRADE NOT OPENED\n\n" + error.message + "\n\n" + paperHelp());
     }
@@ -2575,11 +2585,14 @@ async function handlePaperRequest(chatId, request) {
     const result = await refreshPaperPositions(chatId);
     const positions = [...result.updated, ...result.closed];
     if (!positions.length) return bot.sendMessage(chatId, "PAPER POSITIONS\n\nNo open paper positions.");
-    return bot.sendMessage(chatId, [
-      "PAPER POSITIONS",
-      "",
-      ...positions.map((position) => result.closed.includes(position) ? formatPaperClosed(position) : formatPaperPosition(position)),
-    ].join("\n\n"));
+    for (const position of positions) {
+      if (result.closed.includes(position)) {
+        await bot.sendMessage(chatId, formatPaperClosed(position));
+      } else {
+        await bot.sendMessage(chatId, formatPaperPosition(position), paperPositionKeyboard(position.id));
+      }
+    }
+    return;
   }
   if (request.action === "stats") {
     const stats = await getPaperStats(chatId);
@@ -5171,6 +5184,26 @@ bot.on("callback_query", async (query) => {
   if (!chatId) return;
 
   try {
+    if (action.startsWith("paper_refresh:")) {
+      const positionId = Number(action.slice("paper_refresh:".length));
+      const owned = getPaperOpenPositions(chatId).find((position) => position.id === positionId);
+      if (!owned) return bot.sendMessage(chatId, "This paper position is no longer open.");
+      const result = await refreshPaperPositions(chatId);
+      const updated = result.updated.find((position) => position.id === positionId);
+      const closed = result.closed.find((position) => position.id === positionId);
+      if (closed) return safeEditMessage(chatId, messageId, "PAPER POSITION CLOSED AUTOMATICALLY\n\n" + formatPaperClosed(closed));
+      return safeEditMessage(chatId, messageId, formatPaperPosition(updated || owned), paperPositionKeyboard(positionId));
+    }
+
+    if (action.startsWith("paper_close:")) {
+      const positionId = Number(action.slice("paper_close:".length));
+      const owned = getPaperOpenPositions(chatId).find((position) => position.id === positionId);
+      if (!owned) return bot.sendMessage(chatId, "This paper position is already closed.");
+      const result = await refreshPaperPositions(chatId);
+      const current = result.updated.find((position) => position.id === positionId) || owned;
+      const closed = closePaperPosition(current.id, current.mark_price, "MANUAL");
+      return safeEditMessage(chatId, messageId, "PAPER POSITION CLOSED\n\n" + formatPaperClosed(closed));
+    }
     if (action === "scan_market") {
       return runManualScan(chatId, preferredVenue(chatId));
     }
