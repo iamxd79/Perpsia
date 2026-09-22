@@ -61,6 +61,11 @@ function getClient(options = {}) {
   return { client: clientState.client, model };
 }
 
+function getReasoningEffort(options = {}) {
+  const value = String(options.reasoningEffort || process.env.XAI_REASONING_EFFORT || "low").toLowerCase();
+  return ["low", "medium", "high", "xhigh"].includes(value) ? value : "low";
+}
+
 function boundedList(value, limit = 5) {
   return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean).slice(0, limit) : [];
 }
@@ -160,6 +165,7 @@ async function researchAsset({ symbol, signal = {}, evidence = [], options = {} 
     const response = await executeWithResilience(
       () => configured.client.responses.create({
         model: configured.model,
+        reasoning: { effort: getReasoningEffort(options) },
         input: [
           {
             role: "system",
