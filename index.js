@@ -130,6 +130,7 @@ const {
   refreshPositions: refreshPaperPositions,
   startPaperTradingMonitor,
 } = require("./services/paperTrading");
+const { getAdminStats, getAdminUsers, getLeaderboard, getUserStats, isAdmin, markUserStatus, trackUser } = require("./services/userAnalytics");
 
 
 
@@ -2526,6 +2527,28 @@ bot.onText(/^\/help(?:@\w+)?$/i, async (msg) => {
 });
 
 
+function formatPrivateStats(chatId) {
+  const stats = getUserStats(chatId);
+  return [
+    "MY PAPER PERFORMANCE",
+    "",
+    "Open positions: " + stats.open,
+    "Closed trades: " + stats.closed,
+    "Wins / losses: " + stats.wins + " / " + stats.losses,
+    "Win rate: " + stats.winRate.toFixed(1) + "%",
+    "Realized PnL: " + (stats.realized >= 0 ? "+" : "") + "$" + stats.realized.toFixed(2),
+    "",
+    "Only you can see these statistics.",
+  ].join("\n");
+}
+
+function requireAdmin(chatId) {
+  if (!isAdmin(chatId)) {
+    void bot.sendMessage(chatId, "⛔ Private admin command.");
+    return false;
+  }
+  return true;
+}
 function paperHelp() {
   return [
     "PAPER TRADING (SIMULATION ONLY)",
@@ -4454,6 +4477,52 @@ bot.onText(/^\/watchlist(?:@\w+)?(?:\s+(add|remove)\s+\$?([A-Za-z0-9]+))?$/i, as
 });
 
 
+bot.on("my_chat_member", (update) => {
+  const chatId = update?.chat?.id;
+  const status = update?.new_chat_member?.status;
+  if (chatId && (status === "kicked" || status === "left")) markUserStatus(chatId, "blocked");
+});
+bot.onText(/^\/mystats(?:@\w+)?$/i, async (msg) => {
+  return bot.sendMessage(msg.chat.id, formatPrivateStats(msg.chat.id));
+});
+
+bot.onText(/^\/adminstats(?:@\w+)?$/i, async (msg) => {
+  if (!requireAdmin(msg.chat.id)) return;
+  const stats = getAdminStats();
+  return bot.sendMessage(msg.chat.id, [
+    "PRIVATE ADMIN ANALYTICS",
+    "",
+    "Total users: " + stats.users,
+    "Active 24h: " + stats.active24h,
+    "Active 7d: " + stats.active7d,
+    "Blocked users: " + stats.blocked,
+    "Events 24h: " + stats.events24h,
+  ].join("\n"));
+});
+
+bot.onText(/^\/users(?:@\w+)?$/i, async (msg) => {
+  if (!requireAdmin(msg.chat.id)) return;
+  const users = getAdminUsers();
+  return bot.sendMessage(msg.chat.id, [
+    "PRIVATE USER DIRECTORY",
+    "",
+    ...users.map((user) => (user.username ? "@" + user.username : user.chat_id) + " · " + user.status + " · last seen " + user.last_seen_at),
+  ].join("\n"));
+});
+
+bot.onText(/^\/leaderboard(?:@\w+)?$/i, async (msg) => {
+  if (!requireAdmin(msg.chat.id)) return;
+  const leaderboard = getLeaderboard();
+  if (!leaderboard.length) return bot.sendMessage(msg.chat.id, "PRIVATE LEADERBOARD\n\nNo paper trades recorded yet.");
+  return bot.sendMessage(msg.chat.id, [
+    "PRIVATE PAPER LEADERBOARD",
+    "",
+    ...leaderboard.map((row, index) => {
+      const name = row.user.username ? "@" + row.user.username : row.user.chat_id;
+      return (index + 1) + ". " + name + " · " + (row.stats.realized >= 0 ? "+" : "") + "$" + row.stats.realized.toFixed(2) + " · " + row.stats.winRate.toFixed(1) + "% win rate";
+    }),
+  ].join("\n"));
+});
 bot.onText(/^\/paper(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
   const request = parsePaperCommand(match[1] || "help");
   return handlePaperRequest(msg.chat.id, request);
@@ -4520,6 +4589,7 @@ bot.onText(/^\/about(?:@\w+)?$/i, async (msg) => {
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text?.trim();
+  trackUser(msg, text?.startsWith("/start") ? "start" : "message");
 
 
 
