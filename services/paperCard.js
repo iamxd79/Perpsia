@@ -28,7 +28,10 @@ function calculatePnl(position) {
 }
 
 function renderSvg(position) {
-  const { pnl, percent } = calculatePnl(position);
+  const live = calculatePnl(position);
+  const closed = position.status === "CLOSED";
+  const pnl = closed ? finite(position.realized_pnl) : live.pnl;
+  const percent = closed && finite(position.margin) ? (pnl / finite(position.margin)) * 100 : live.percent;
   const positive = pnl >= 0;
   const accent = positive ? "#51e6a7" : "#ff6f91";
   const directionColor = position.direction === "LONG" ? "#55c8ff" : "#ff9a76";
@@ -36,6 +39,8 @@ function renderSvg(position) {
   const direction = escapeXml(position.direction || "PAPER");
   const source = escapeXml(position.venue || "Public exchange data");
   const pnlText = (positive ? "+" : "") + money(pnl);
+  const eventLabel = position.exit_reason === "TAKE_PROFIT" ? "✅ TAKE PROFIT HIT" : position.exit_reason === "STOP_LOSS" ? "🛑 STOP LOSS HIT" : closed ? "✅ POSITION CLOSED" : "OPEN";
+  const pnlLabel = closed ? "REALIZED PNL" : "UNREALIZED PNL";
   const percentText = (positive ? "+" : "") + percent.toFixed(2) + "%";
   const markX = Math.max(170, Math.min(1030, 600 + Math.max(-1, Math.min(1, percent / 10)) * 300));
 
@@ -62,8 +67,8 @@ function renderSvg(position) {
     <text x="710" y="305" fill="#8fa8bb" font-family="Arial, sans-serif" font-size="20">MARGIN</text>
     <text x="710" y="352" fill="#ffffff" font-family="Arial, sans-serif" font-size="34" font-weight="700">${money(position.margin)}</text>
     <text x="1010" y="305" fill="#8fa8bb" font-family="Arial, sans-serif" font-size="20">STATUS</text>
-    <text x="1010" y="352" fill="${accent}" font-family="Arial, sans-serif" font-size="27" font-weight="700">${escapeXml(position.status || "OPEN")}</text>
-    <text x="72" y="484" fill="#8fa8bb" font-family="Arial, sans-serif" font-size="22">UNREALIZED PNL</text>
+    <text x="1010" y="352" fill="${accent}" font-family="Arial, sans-serif" font-size="27" font-weight="700">${escapeXml(closed ? eventLabel : (position.status || "OPEN"))}</text>
+    <text x="72" y="484" fill="#8fa8bb" font-family="Arial, sans-serif" font-size="22">${pnlLabel}</text>
     <text x="72" y="555" fill="${accent}" font-family="Arial, sans-serif" font-size="66" font-weight="800">${pnlText}</text>
     <text x="390" y="548" fill="${accent}" font-family="Arial, sans-serif" font-size="30" font-weight="700">(${percentText})</text>
     <line x1="700" y1="518" x2="1070" y2="518" stroke="#ffffff" stroke-opacity="0.18" stroke-width="4"/>
@@ -79,4 +84,8 @@ async function renderPaperPnlCard(position) {
   return sharp(Buffer.from(renderSvg(position))).png().toBuffer();
 }
 
-module.exports = { renderPaperPnlCard, renderSvg };
+async function renderPaperClosedCard(position) {
+  return sharp(Buffer.from(renderSvg({ ...position, status: "CLOSED" }))).png().toBuffer();
+}
+
+module.exports = { renderPaperClosedCard, renderPaperPnlCard, renderSvg };

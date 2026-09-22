@@ -130,7 +130,7 @@ const {
   refreshPositions: refreshPaperPositions,
   startPaperTradingMonitor,
 } = require("./services/paperTrading");
-const { renderPaperPnlCard } = require("./services/paperCard");
+const { renderPaperClosedCard, renderPaperPnlCard } = require("./services/paperCard");
 const { getAdminStats, getAdminUsers, getLeaderboard, getUserStats, isAdmin, markUserStatus, trackUser } = require("./services/userAnalytics");
 
 
@@ -2528,6 +2528,15 @@ bot.onText(/^\/help(?:@\w+)?$/i, async (msg) => {
 });
 
 
+async function sendPaperClosedCard(chatId, position) {
+  try {
+    const image = await renderPaperClosedCard(position);
+    return bot.sendPhoto(chatId, image, { caption: "Paper trade closed · " + position.symbol });
+  } catch (error) {
+    console.error("Closed paper card render failed:", error.message);
+    return bot.sendMessage(chatId, formatPaperClosed(position));
+  }
+}
 async function sendPaperCard(chatId, position, messageId = null) {
   const options = paperPositionKeyboard(position.id);
   try {
@@ -2627,7 +2636,7 @@ async function handlePaperRequest(chatId, request) {
     const refreshed = await refreshPaperPositions(chatId);
     const current = refreshed.updated.find((item) => item.id === position.id) || position;
     const closed = closePaperPosition(current.id, current.mark_price, "MANUAL");
-    return bot.sendMessage(chatId, "PAPER POSITION CLOSED\n\n" + formatPaperClosed(closed));
+    return sendPaperClosedCard(chatId, closed);
   }
 }function preferredVenue(chatId, fallback = "Binance") {
   const requested = getUserPreferences(chatId)?.preferred_exchange || fallback;
@@ -5203,7 +5212,7 @@ bot.on("callback_query", async (query) => {
       const result = await refreshPaperPositions(chatId);
       const updated = result.updated.find((position) => position.id === positionId);
       const closed = result.closed.find((position) => position.id === positionId);
-      if (closed) return bot.sendMessage(chatId, "PAPER POSITION CLOSED AUTOMATICALLY\n\n" + formatPaperClosed(closed));
+      if (closed) return sendPaperClosedCard(chatId, closed);
       return sendPaperCard(chatId, updated || owned, messageId);
     }
 
@@ -5214,7 +5223,7 @@ bot.on("callback_query", async (query) => {
       const result = await refreshPaperPositions(chatId);
       const current = result.updated.find((position) => position.id === positionId) || owned;
       const closed = closePaperPosition(current.id, current.mark_price, "MANUAL");
-      return bot.sendMessage(chatId, "PAPER POSITION CLOSED\n\n" + formatPaperClosed(closed));
+      return sendPaperClosedCard(chatId, closed);
     }
     if (action === "scan_market") {
       return runManualScan(chatId, preferredVenue(chatId));
@@ -5485,7 +5494,7 @@ bot.onText(/^\/status(?:@\w+)?$/i, async (msg) => {
 
 
 const stopPaperTradingMonitor = startPaperTradingMonitor(async (position) => {
-  await bot.sendMessage(String(position.chat_id), "PAPER POSITION CLOSED AUTOMATICALLY\n\n" + formatPaperClosed(position));
+  await sendPaperClosedCard(String(position.chat_id), position);
 });
 
 void startTelegramPolling();
