@@ -190,10 +190,9 @@ async function researchAsset({ symbol, signal = {}, evidence = [], options = {} 
             ],
           },
         ],
-        tools: [
-          { type: "web_search" },
-          { type: "x_search" },
-        ],
+        tools: process.env.PERPSIA_GROK_ENABLE_X_SEARCH === "true"
+          ? [{ type: "web_search" }, { type: "x_search" }]
+          : [{ type: "web_search" }],
         text: {
           format: {
             type: "json_schema",
