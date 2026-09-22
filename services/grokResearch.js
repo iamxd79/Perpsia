@@ -9,6 +9,7 @@ const {
 const DEFAULT_MODEL = "grok-4.6";
 const clientState = { client: null, key: null };
 const breaker = new CircuitBreaker(3, 120000, { name: "Grok research" });
+const runtimeHealth = { requests: 0, successes: 0, unavailable: 0, lastStatus: "idle", lastRequestAt: null, lastError: null };
 
 const researchSchema = {
   type: "object",
@@ -125,10 +126,14 @@ function normalizeResearch(parsed, response) {
   };
 }
 
+function getGrokHealth() {
+  return { ...runtimeHealth, breaker: breaker.snapshot() };
+}
+
 async function researchAsset({ symbol, signal = {}, evidence = [], options = {} } = {}) {
-  if (!enabled(options)) return { status: "disabled", provider: "grok", direction: "NEUTRAL", citationCount: 0 };
+  if (!enabled(options)) { if (!runtimeHealth.requests) runtimeHealth.lastStatus = "disabled"; return { status: "disabled", provider: "grok", direction: "NEUTRAL", citationCount: 0 }; }
   const configured = getClient(options);
-  if (!configured) return { status: "disabled", provider: "grok", direction: "NEUTRAL", citationCount: 0, reason: "XAI_API_KEY is not configured" };
+  if (!configured) { if (!runtimeHealth.requests) runtimeHealth.lastStatus = "unconfigured"; return { status: "disabled", provider: "grok", direction: "NEUTRAL", citationCount: 0, reason: "XAI_API_KEY is not configured" }; }
 
   const safeEvidence = (Array.isArray(evidence) ? evidence : []).slice(0, 12).map((record) => ({
     provider: record.provider,
@@ -149,6 +154,9 @@ async function researchAsset({ symbol, signal = {}, evidence = [], options = {} 
   }));
 
   try {
+    runtimeHealth.requests += 1;
+    runtimeHealth.lastRequestAt = new Date().toISOString();
+    runtimeHealth.lastError = null;
     const response = await executeWithResilience(
       () => configured.client.responses.create({
         model: configured.model,
@@ -197,8 +205,13 @@ async function researchAsset({ symbol, signal = {}, evidence = [], options = {} 
       }),
       { breaker, retries: 1, baseDelayMs: 500, maxDelayMs: 2000 },
     );
+    runtimeHealth.successes += 1;
+    runtimeHealth.lastStatus = "available";
     return normalizeResearch(parseStructuredOutput(response), response);
   } catch (error) {
+    runtimeHealth.unavailable += 1;
+    runtimeHealth.lastStatus = "unavailable";
+    runtimeHealth.lastError = String(error?.message || error);
     return {
       status: "unavailable",
       provider: "grok",
@@ -212,5 +225,6 @@ async function researchAsset({ symbol, signal = {}, evidence = [], options = {} 
 
 module.exports = {
   DEFAULT_MODEL,
+  getGrokHealth,
   researchAsset,
 };

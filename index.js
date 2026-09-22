@@ -19,6 +19,8 @@ require("dotenv").config();
 const {
   buildReasoningBrief,
 } = require("./services/openaiReasoning");
+const { getGrokHealth } = require("./services/grokResearch");
+const { getOpenAISignalValidationHealth } = require("./services/openaiSignalValidation");
 
 
 
@@ -364,12 +366,13 @@ function getIntegrationHealth() {
   const has = (name) => Boolean(String(process.env[name] || "").trim());
   return {
     cmc: { configured: has("CMC_MCP_ENDPOINT"), circuit: cmcCircuitBreaker.snapshot() },
-    grok: { enabled: process.env.PERPSIA_ENABLE_GROK_RESEARCH === "true", configured: has("XAI_API_KEY"), model: process.env.XAI_MODEL || "grok-4.6" },
+    grok: { enabled: process.env.PERPSIA_ENABLE_GROK_RESEARCH === "true", configured: has("XAI_API_KEY"), model: process.env.XAI_MODEL || "grok-4.6", runtime: getGrokHealth() },
     openai: {
       enabled: process.env.PERPSIA_ENABLE_OPENAI_SIGNAL_VALIDATION === "true" || has("OPENAI_API_KEY"),
       configured: has("OPENAI_API_KEY"),
       activation: "default_on_when_configured",
       model: process.env.OPENAI_SIGNAL_MODEL || "gpt-5.5",
+      runtime: getOpenAISignalValidationHealth(),
     },
   };
 }
