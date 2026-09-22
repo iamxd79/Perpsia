@@ -313,7 +313,7 @@ Checking memory and alert conditions...`
     ]
       .slice()
       .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))
-      .slice(0, 10)
+      .slice(0, 20)
       .map((signal) => ({
         symbol: signal.symbol,
         category: signal.category,
