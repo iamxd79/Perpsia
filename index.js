@@ -119,6 +119,17 @@ const {
 // ========== BACKTESTER FOR PAPER TRADING ==========
 const { Backtester } = require("./services/backtester");
 const backtester = new Backtester();
+const {
+  closePosition: closePaperPosition,
+  formatClosed: formatPaperClosed,
+  formatPosition: formatPaperPosition,
+  getOpenPositions: getPaperOpenPositions,
+  getStats: getPaperStats,
+  openPosition: openPaperPosition,
+  parsePaperCommand,
+  refreshPositions: refreshPaperPositions,
+  startPaperTradingMonitor,
+} = require("./services/paperTrading");
 
 
 
@@ -2515,7 +2526,62 @@ bot.onText(/^\/help(?:@\w+)?$/i, async (msg) => {
 });
 
 
-function preferredVenue(chatId, fallback = "Binance") {
+function paperHelp() {
+  return [
+    "PAPER TRADING (SIMULATION ONLY)",
+    "",
+    "/paper long BTCUSDT 1000 5 sl=62000 tp=65000",
+    "Direction, symbol, margin, leverage, then optional SL and TP.",
+    "",
+    "Manage: /paper positions · /paper close BTCUSDT · /paper stats",
+    "Prices use public exchange data. No real orders are sent.",
+  ].join("\n");
+}
+
+async function handlePaperRequest(chatId, request) {
+  if (!request || request.action === "help") return bot.sendMessage(chatId, paperHelp());
+  if (request.action === "open") {
+    try {
+      const position = await openPaperPosition(chatId, request);
+      return bot.sendMessage(chatId, "✅ PAPER POSITION OPENED\n\n" + formatPaperPosition(position));
+    } catch (error) {
+      return bot.sendMessage(chatId, "PAPER TRADE NOT OPENED\n\n" + error.message + "\n\n" + paperHelp());
+    }
+  }
+  if (request.action === "positions") {
+    const result = await refreshPaperPositions(chatId);
+    const positions = [...result.updated, ...result.closed];
+    if (!positions.length) return bot.sendMessage(chatId, "PAPER POSITIONS\n\nNo open paper positions.");
+    return bot.sendMessage(chatId, [
+      "PAPER POSITIONS",
+      "",
+      ...positions.map((position) => result.closed.includes(position) ? formatPaperClosed(position) : formatPaperPosition(position)),
+    ].join("\n\n"));
+  }
+  if (request.action === "stats") {
+    const stats = await getPaperStats(chatId);
+    return bot.sendMessage(chatId, [
+      "PAPER PERFORMANCE",
+      "",
+      "Open positions: " + stats.open.length,
+      "Closed trades: " + stats.totalClosed,
+      "Wins / losses: " + stats.wins + " / " + stats.losses,
+      "Realized PnL: " + (stats.realized >= 0 ? "+" : "") + "$" + stats.realized.toFixed(2),
+      "Unrealized PnL: " + (stats.unrealized >= 0 ? "+" : "") + "$" + stats.unrealized.toFixed(2),
+      "",
+      "Simulation only — this does not place real orders.",
+    ].join("\n"));
+  }
+  if (request.action === "close") {
+    const positions = getPaperOpenPositions(chatId);
+    const position = request.symbol ? positions.find((item) => item.symbol === request.symbol) : positions[0];
+    if (!position) return bot.sendMessage(chatId, "No matching open paper position.");
+    const refreshed = await refreshPaperPositions(chatId);
+    const current = refreshed.updated.find((item) => item.id === position.id) || position;
+    const closed = closePaperPosition(current.id, current.mark_price, "MANUAL");
+    return bot.sendMessage(chatId, "PAPER POSITION CLOSED\n\n" + formatPaperClosed(closed));
+  }
+}function preferredVenue(chatId, fallback = "Binance") {
   const requested = getUserPreferences(chatId)?.preferred_exchange || fallback;
   try {
     return normalizeVenue(requested);
@@ -4388,6 +4454,11 @@ bot.onText(/^\/watchlist(?:@\w+)?(?:\s+(add|remove)\s+\$?([A-Za-z0-9]+))?$/i, as
 });
 
 
+bot.onText(/^\/paper(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
+  const request = parsePaperCommand(match[1] || "help");
+  return handlePaperRequest(msg.chat.id, request);
+});
+
 bot.onText(/^\/history(?:@\w+)?(?:\s+\$?([A-Za-z0-9]+))?$/i, async (msg, match) => {
   return runHistory(msg.chat.id, match[1]);
 });
@@ -4467,6 +4538,9 @@ bot.on("message", async (msg) => {
 
   if (!text) return;
   if (text.startsWith("/")) return;
+
+  const paperRequest = parsePaperCommand(text);
+  if (paperRequest) return handlePaperRequest(chatId, paperRequest);
 
 
 
@@ -5295,6 +5369,10 @@ bot.onText(/^\/status(?:@\w+)?$/i, async (msg) => {
 
 
 
+const stopPaperTradingMonitor = startPaperTradingMonitor(async (position) => {
+  await bot.sendMessage(String(position.chat_id), "PAPER POSITION CLOSED AUTOMATICALLY\n\n" + formatPaperClosed(position));
+});
+
 void startTelegramPolling();
 
 
@@ -5409,6 +5487,7 @@ function shutdown(signal) {
   releaseTelegramPollingLock();
   stopAlchemyWatchlistSync();
   stopWalletRefresh();
+  stopPaperTradingMonitor?.();
   try { bot.stopPolling?.(); } catch (error) {
     structuredLog("warn", "telegram_polling_stop_failed", { message: error.message });
   }
