@@ -194,9 +194,9 @@ async function researchAsset({ symbol, signal = {}, evidence = [], options = {} 
           { type: "web_search" },
           { type: "x_search" },
         ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
+        text: {
+          format: {
+            type: "json_schema",
             name: "perpsia_market_research",
             strict: true,
             schema: researchSchema,
