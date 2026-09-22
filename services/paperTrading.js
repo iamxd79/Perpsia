@@ -101,23 +101,31 @@ function priceEndpoint(symbol, venue) {
 
 async function fetchMarkPrice(symbol, venue = "Binance", fetchImpl = globalThis.fetch) {
   if (typeof fetchImpl !== "function") throw new Error("Price provider is unavailable.");
-  const normalizedVenue = normalizeVenue(venue);
-  const response = await fetchImpl(priceEndpoint(symbol, normalizedVenue), {
-    signal: AbortSignal.timeout(8000),
-    headers: { accept: "application/json" },
-  });
-  if (!response.ok) throw new Error(`${normalizedVenue} price request failed (${response.status}).`);
-  const body = await response.json();
-  const raw = normalizedVenue === "Bybit"
-    ? body?.result?.list?.[0]?.lastPrice
-    : normalizedVenue === "OKX"
-      ? body?.data?.[0]?.last
-      : body?.price;
-  const price = number(raw);
-  if (!price || price <= 0) throw new Error(`${normalizedVenue} returned no usable price for ${symbol}.`);
-  return price;
+  const requestedVenue = normalizeVenue(venue);
+  const candidates = [requestedVenue, "Bybit", "OKX", "Binance"].filter((item, index, list) => list.indexOf(item) === index);
+  const failures = [];
+  for (const candidate of candidates) {
+    try {
+      const response = await fetchImpl(priceEndpoint(symbol, candidate), {
+        signal: AbortSignal.timeout(8000),
+        headers: { accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(candidate + " price request failed (" + response.status + ").");
+      const body = await response.json();
+      const raw = candidate === "Bybit"
+        ? body?.result?.list?.[0]?.lastPrice
+        : candidate === "OKX"
+          ? body?.data?.[0]?.last
+          : body?.price;
+      const price = number(raw);
+      if (!price || price <= 0) throw new Error(candidate + " returned no usable price for " + symbol + ".");
+      return price;
+    } catch (error) {
+      failures.push(error.message);
+    }
+  }
+  throw new Error("All public price providers failed: " + failures.join(" | "));
 }
-
 function validateOrder(order) {
   if (!order || !["LONG", "SHORT"].includes(order.direction)) throw new Error("Direction must be LONG or SHORT.");
   if (!order.symbol || !order.symbol.endsWith("USDT")) throw new Error("Use a USDT perpetual symbol, for example BTCUSDT.");

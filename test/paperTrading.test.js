@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { normalizeSymbol, parsePaperCommand } = require("../services/paperTrading");
+const { fetchMarkPrice, normalizeSymbol, parsePaperCommand } = require("../services/paperTrading");
 
 test("parses LONG paper orders with risk levels", () => {
   const order = parsePaperCommand("/paper long BTCUSDT 1000 5 sl=62000 tp=65000");
@@ -33,4 +33,16 @@ test("parses SHORT orders and management commands", () => {
 test("normalizes symbols for USDT perpetuals", () => {
   assert.equal(normalizeSymbol("$sol-usdt"), "SOLUSDT");
   assert.equal(normalizeSymbol("BTC"), "BTCUSDT");
+});
+
+test("falls back from a restricted Binance price endpoint", async () => {
+  const calls = [];
+  const price = await fetchMarkPrice("BTCUSDT", "Binance", async (url) => {
+    calls.push(url);
+    if (url.includes("binance")) return { ok: false, status: 451, json: async () => ({}) };
+    return { ok: true, status: 200, json: async () => ({ result: { list: [{ lastPrice: "64000" }] } }) };
+  });
+  assert.equal(price, 64000);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1], /bybit/);
 });
