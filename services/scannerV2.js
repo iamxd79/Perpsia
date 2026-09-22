@@ -4373,7 +4373,7 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
       const useAiValidation = aiEligible && aiValidationCount < aiValidationLimit && !scanDeadlineReached(options.deadlineAt, aiReserveMs);
       if (useAiValidation) aiValidationCount += 1;
       const remainingForAi = remainingScanMs(options.deadlineAt);
-      const configuredAiTimeoutMs = Number(process.env.PERPSIA_AI_CALL_TIMEOUT_MS || 12000);
+      const configuredAiTimeoutMs = Number(process.env.PERPSIA_AI_CALL_TIMEOUT_MS || 30000);
       const aiTimeoutMs = Math.max(2000, Math.min(Number.isFinite(configuredAiTimeoutMs) ? configuredAiTimeoutMs : 12000, Number.isFinite(remainingForAi) ? Math.max(2000, remainingForAi - 5000) : 12000));
       const [research, openaiValidation] = await Promise.all([
         researchAsset({
