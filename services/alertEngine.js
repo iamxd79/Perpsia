@@ -101,27 +101,53 @@ function shouldSendAlert(current, previous) {
   };
 }
 
+function noTradeReason(signal = {}) {
+  const state = String(signal.marketState || "").toLowerCase();
+  if (signal.hasCoreData === false || state.includes("insufficient") || state.includes("data")) {
+    return "No trade: market data is incomplete. Wait for a clean, confirmed data set.";
+  }
+  if (state.includes("security")) {
+    return "No trade: security checks blocked this asset.";
+  }
+  if (state.includes("overextended") || state.includes("chasing")) {
+    return "No trade: the move is already extended. Wait for a safer pullback or reset.";
+  }
+  if (state.includes("squeeze") || state.includes("crowd") || state.includes("unwind")) {
+    return "No trade: the directional read conflicts with positioning risk. Keep it on watch.";
+  }
+  if (signal.lifecycleStage === "INVALIDATED") {
+    return "No trade: the previous setup lost confirmation. A new setup must build from fresh evidence.";
+  }
+  return "No trade: evidence is mixed or below the confirmation threshold. Directional bias can still change.";
+}
+
 function friendlyMarketState(signal = {}) {
   const category = String(signal.category || "").toLowerCase();
-  if (category === "long") return "Developing bullish setup";
-  if (category === "short") return "Developing bearish setup";
+  const state = String(signal.marketState || "").toLowerCase();
+  if (category === "long") return signal.isActionable ? "Active bullish setup" : "Developing bullish setup";
+  if (category === "short") return signal.isActionable ? "Active bearish setup" : "Developing bearish setup";
   if (category === "watchlist") return "Watchlist candidate";
-  return "Developing market conditions";
+  if (state.includes("security")) return "Security review required";
+  if (state.includes("overextended") || state.includes("chasing")) return "Overextended move";
+  if (signal.hasCoreData === false || state.includes("insufficient")) return "Data quality gap";
+  return "Mixed / developing conditions";
 }
 
-function friendlyCategory(category) {
+function friendlyCategory(category, signal = {}) {
   const value = String(category || "").toLowerCase();
-  if (value === "long") return "LONG candidate";
-  if (value === "short") return "SHORT candidate";
+  if (value === "long") return signal.isActionable ? "LONG" : "LONG candidate";
+  if (value === "short") return signal.isActionable ? "SHORT" : "SHORT candidate";
   if (value === "watchlist") return "WATCHLIST";
-  return "MONITORING";
+  return "NO TRADE";
 }
 
-function friendlyDirection(direction) {
+function friendlyDirection(direction, signal = {}) {
   const value = String(direction || "").toLowerCase();
   if (value.includes("bull")) return "Bullish bias";
   if (value.includes("bear")) return "Bearish bias";
-  return "Market context";
+  if (signal.evidence?.perpFlow === "Bullish") return "Bullish evidence, not confirmed";
+  if (signal.evidence?.perpFlow === "Bearish") return "Bearish evidence, not confirmed";
+  return "Mixed / no directional edge";
 }
 
 function friendlyAlertType(alertType) {
@@ -138,10 +164,10 @@ function friendlyAlertType(alertType) {
 }
 
 function friendlyVerdict(signal = {}) {
-  if (signal.isActionable) return "Actionable setup detected. Review the risk plan before execution.";
-  if (signal.category === "long" || signal.category === "short") return "Directional bias detected. Waiting for stronger confirmation before an active setup.";
-  if (signal.category === "watchlist") return "Watchlist candidate. Momentum or confirmation is still developing.";
-  return "Market context is developing. No active setup is being issued yet.";
+  if (signal.isActionable) return `Opportunity: ${String(signal.category).toUpperCase()}. Review entry, invalidation and risk before execution.`;
+  if (signal.category === "long" || signal.category === "short") return `Opportunity: ${String(signal.category).toUpperCase()} candidate. Direction is visible; confirmation is still building.`;
+  if (signal.category === "watchlist") return "Opportunity: WATCHLIST. Momentum or confirmation is developing; wait for the trigger.";
+  return noTradeReason(signal);
 }
 function formatSmartAlert(signal, alertDecision) {
   const icon =
@@ -160,8 +186,8 @@ Update: ${friendlyAlertType(alertDecision.alertType)}
 Reason: ${alertDecision.reason}
 
 Market State: ${friendlyMarketState(signal)}
-Category: ${friendlyCategory(signal.category)}
-Direction: ${friendlyDirection(signal.direction)}
+Category: ${friendlyCategory(signal.category, signal)}
+Direction: ${friendlyDirection(signal.direction, signal)}
 Score: ${signal.score}/100
 
 Price: ${signal.price}
@@ -172,7 +198,7 @@ Funding: ${signal.funding}%
 Why:
 ${signal.reasons.slice(0, 4).map((r) => `• ${r}`).join("\n")}
 
-Verdict:
+User read:
 ${friendlyVerdict(signal)}
 `;
 }
