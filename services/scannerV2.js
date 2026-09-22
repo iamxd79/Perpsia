@@ -76,6 +76,14 @@ const VENUE_DISCOVERY = {
 
 // Global request queue: 1 concurrent skill call to avoid overwhelming CMC
 const skillQueue = new RequestQueue(1, 1);
+function remainingScanMs(deadlineAt) {
+  if (!deadlineAt) return Infinity;
+  return Number(deadlineAt) - Date.now();
+}
+
+function scanDeadlineReached(deadlineAt, reserveMs = 0) {
+  return Number.isFinite(Number(deadlineAt)) && remainingScanMs(deadlineAt) <= reserveMs;
+}
 
 
 
@@ -3892,11 +3900,11 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
 
 
     try {
-      if (options.deadlineAt && Date.now() >= Number(options.deadlineAt)) {
-        errors.push({ symbol: "__scan__", reason: "Market scan deadline exceeded before analyzing " + symbol });
+      const candidateReserveMs = Number(options.candidateReserveMs || process.env.PERPSIA_SCAN_CANDIDATE_RESERVE_MS || 15000);
+      if (scanDeadlineReached(options.deadlineAt, candidateReserveMs)) {
+        errors.push({ symbol: "__scan__", reason: "Market scan deadline reached before analyzing " + symbol });
         break;
       }
-
       await onProgress({
         percent: basePercent,
         stage: `$${symbol} Early Structure`,
@@ -4361,25 +4369,32 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
       const aiEligible = baseSignal.hasCoreData && (
         deepAnalysis || baseSignal.direction !== "Neutral"
       );
-      const useAiValidation = aiEligible && aiValidationCount < aiValidationLimit;
+      const aiReserveMs = Number(options.aiReserveMs || process.env.PERPSIA_AI_RESERVE_MS || 30000);
+      const useAiValidation = aiEligible && aiValidationCount < aiValidationLimit && !scanDeadlineReached(options.deadlineAt, aiReserveMs);
       if (useAiValidation) aiValidationCount += 1;
-      const research = await researchAsset({
-        symbol,
-        signal: baseSignal,
-        evidence: evidenceRecords,
-        options: {
-          enabled: useAiValidation && options.enableGrokResearch !== false,
-        },
-      });
-      const openaiValidation = await validateSignal({
-        symbol,
-        signal: baseSignal,
-        evidence: evidenceRecords,
-        options: {
-          enabled: useAiValidation && options.enableOpenAISignalValidation !== false,
-        },
-      });
-
+      const remainingForAi = remainingScanMs(options.deadlineAt);
+      const configuredAiTimeoutMs = Number(process.env.PERPSIA_AI_CALL_TIMEOUT_MS || 12000);
+      const aiTimeoutMs = Math.max(2000, Math.min(Number.isFinite(configuredAiTimeoutMs) ? configuredAiTimeoutMs : 12000, Number.isFinite(remainingForAi) ? Math.max(2000, remainingForAi - 5000) : 12000));
+      const [research, openaiValidation] = await Promise.all([
+        researchAsset({
+          symbol,
+          signal: baseSignal,
+          evidence: evidenceRecords,
+          options: {
+            enabled: useAiValidation && options.enableGrokResearch !== false,
+            timeoutMs: aiTimeoutMs,
+          },
+        }),
+        validateSignal({
+          symbol,
+          signal: baseSignal,
+          evidence: evidenceRecords,
+          options: {
+            enabled: useAiValidation && options.enableOpenAISignalValidation !== false,
+            timeoutMs: aiTimeoutMs,
+          },
+        }),
+      ]);
       const result = {
         ...classifyCandidate(symbol, {
           accumulation,

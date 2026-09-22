@@ -173,7 +173,9 @@ async function runScheduledScan({ bot, chatId, venue }) {
 
   const configuredScanTimeoutMs = Number(process.env.PERPSIA_SCHEDULER_SCAN_TIMEOUT_MS || 12 * 60 * 1000);
   const scanTimeoutMs = Math.min(Math.max(Number.isFinite(configuredScanTimeoutMs) ? configuredScanTimeoutMs : 12 * 60 * 1000, 60 * 1000), 30 * 60 * 1000);
-  const scanDeadlineAt = Date.now() + scanTimeoutMs;
+  // Leave a safety margin so the scan can classify and persist partial results before the watchdog.
+  const scanSafetyMarginMs = Math.min(Math.max(Number(process.env.PERPSIA_SCAN_SAFETY_MARGIN_MS || 30000), 10000), 120000);
+  const scanDeadlineAt = Date.now() + Math.max(1000, scanTimeoutMs - scanSafetyMarginMs);
   const runStartedAt = schedulerState.lastRunAt;
   let scanTimedOut = false;
   const scanWatchdog = setTimeout(() => {
