@@ -53,7 +53,7 @@ test("renders the concise start and help experiences", () => {
   assert.match(HELP_MESSAGE, /Find trades[\s\S]*\/scan[\s\S]*Research[\s\S]*\/compare[\s\S]*Manage[\s\S]*\/settings/);
   assert.deepEqual(
     startKeyboard().inline_keyboard.map((row) => row.map((button) => button.text)),
-    [["Scan Market", "Analyze Token"], ["Early Alpha", "Set Risk"], ["Watchlist", "More"]]
+    [["🔍 Scan Market", "🧠 Analyze Token"], ["⚡ Early Alpha", "🛡 Set Risk"], ["👀 Watchlist", "⋯ More"]]
   );
 });
 
@@ -86,7 +86,7 @@ test("renders compact scan summary and drill-down buttons", () => {
   assert.match(summary, /1 data quality issues/);
   assert.deepEqual(
     scanSummaryKeyboard("OKX").inline_keyboard.flat().map((button) => button.text),
-    ["View Top Setups", "View Watchlist", "Run Again"]
+    ["📈 View Top Setups", "👀 View Watchlist", "🔄 Run Again"]
   );
 });
 

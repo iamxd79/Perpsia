@@ -142,20 +142,26 @@ function realLevel(value) {
   return formatMoney(text);
 }
 
+function styledButton(text, action, style = null) {
+  const button = { text, ...action };
+  if (style) button.style = style;
+  return button;
+}
+
 function startKeyboard() {
   return {
     inline_keyboard: [
       [
-        { text: "Scan Market", callback_data: "scan_market" },
-        { text: "Analyze Token", callback_data: "analyze_asset" },
+        styledButton("🔍 Scan Market", { callback_data: "scan_market" }, "primary"),
+        styledButton("🧠 Analyze Token", { callback_data: "analyze_asset" }, "primary"),
       ],
       [
-        { text: "Early Alpha", callback_data: "early_alpha" },
-        { text: "Set Risk", callback_data: "set_risk" },
+        styledButton("⚡ Early Alpha", { callback_data: "early_alpha" }, "success"),
+        styledButton("🛡 Set Risk", { callback_data: "set_risk" }, "primary"),
       ],
       [
-        { text: "Watchlist", callback_data: "show_watchlist" },
-        { text: "More", callback_data: "show_commands" },
+        styledButton("👀 Watchlist", { callback_data: "show_watchlist" }, "success"),
+        styledButton("⋯ More", { callback_data: "show_commands" }),
       ],
     ],
   };
@@ -242,10 +248,10 @@ function scanSummaryKeyboard(venue = "Binance") {
   return {
     inline_keyboard: [
       [
-        { text: "View Top Setups", callback_data: "scan_view:top" },
-        { text: "View Watchlist", callback_data: "scan_view:watchlist" },
+        styledButton("📈 View Top Setups", { callback_data: "scan_view:top" }, "success"),
+        styledButton("👀 View Watchlist", { callback_data: "scan_view:watchlist" }, "primary"),
       ],
-      [{ text: "Run Again", callback_data: "scan_again:" + safeVenue }],
+      [styledButton("🔄 Run Again", { callback_data: "scan_again:" + safeVenue }, "primary")],
     ],
   };
 }
@@ -390,8 +396,8 @@ function signalKeyboard(signal = {}, tradingLinks = [], options = {}) {
   const rows = [];
   if (symbol) {
     rows.push([
-      { text: "Analyze", callback_data: "analyze:" + symbol + ":" + venue },
-      { text: "Track", callback_data: "track:" + symbol },
+      styledButton("🔍 Analyze", { callback_data: "analyze:" + symbol + ":" + venue }, "primary"),
+      styledButton("➕ Track", { callback_data: "track:" + symbol }, "success"),
     ]);
   }
   for (const row of tradingButtonRows(tradingLinks)) rows.push(row);
@@ -401,7 +407,7 @@ function signalKeyboard(signal = {}, tradingLinks = [], options = {}) {
 function tradingButtonRows(tradingLinks = []) {
   const buttons = (Array.isArray(tradingLinks) ? tradingLinks : [])
     .filter((link) => link?.url && link?.venue)
-    .map((link) => ({ text: "Trade on " + cleanText(link.venue), url: link.url }));
+    .map((link) => (styledButton("↗ Trade on " + cleanText(link.venue), { url: link.url }, "success")));
   const rows = [];
   for (let index = 0; index < buttons.length; index += 2) rows.push(buttons.slice(index, index + 2));
   return rows;
@@ -418,11 +424,11 @@ function watchlistKeyboard(symbols = [], venue = "Binance") {
   const rows = (Array.isArray(symbols) ? symbols : []).slice(0, 8).map((item) => {
     const symbol = cleanText(item.symbol || item).toUpperCase().replace(/[^A-Z0-9]/g, "");
     return [
-      { text: "Analyze " + symbol, callback_data: "analyze:" + symbol + ":" + safeVenue },
-      { text: "Remove", callback_data: "watch_remove:" + symbol },
+      styledButton("🔍 Analyze " + symbol, { callback_data: "analyze:" + symbol + ":" + safeVenue }, "primary"),
+      styledButton("✕ Remove", { callback_data: "watch_remove:" + symbol }, "danger"),
     ];
   });
-  rows.push([{ text: "Settings", callback_data: "show_settings" }]);
+  rows.push([styledButton("⚙ Settings", { callback_data: "show_settings" }, "primary")]);
   return { inline_keyboard: rows };
 }
 
@@ -529,12 +535,12 @@ function settingsKeyboard() {
   return {
     inline_keyboard: [
       [
-        { text: "Binance", callback_data: "settings_venue:Binance" },
-        { text: "Bybit", callback_data: "settings_venue:Bybit" },
+        { text: "Binance", callback_data: "settings_venue:Binance", style: "primary" },
+        { text: "Bybit", callback_data: "settings_venue:Bybit", style: "primary" },
       ],
       [
-        { text: "OKX", callback_data: "settings_venue:OKX" },
-        { text: "Hyperliquid", callback_data: "settings_venue:Hyperliquid" },
+        { text: "OKX", callback_data: "settings_venue:OKX", style: "primary" },
+        { text: "Hyperliquid", callback_data: "settings_venue:Hyperliquid", style: "primary" },
       ],
       [
         { text: "Alerts 1h", callback_data: "settings_frequency:1h" },
@@ -542,13 +548,13 @@ function settingsKeyboard() {
         { text: "Alerts 12h", callback_data: "settings_frequency:12h" },
       ],
       [
-        { text: "Conservative", callback_data: "settings_sensitivity:conservative" },
-        { text: "Balanced", callback_data: "settings_sensitivity:balanced" },
-        { text: "Aggressive", callback_data: "settings_sensitivity:aggressive" },
+        { text: "Conservative", callback_data: "settings_sensitivity:conservative", style: "danger" },
+        { text: "Balanced", callback_data: "settings_sensitivity:balanced", style: "primary" },
+        { text: "Aggressive", callback_data: "settings_sensitivity:aggressive", style: "success" },
       ],
       [
-        { text: "Watchlist", callback_data: "show_watchlist" },
-        { text: "Risk Profile", callback_data: "set_risk" },
+        styledButton("👀 Watchlist", { callback_data: "show_watchlist" }, "success"),
+        styledButton("🛡 Risk Profile", { callback_data: "set_risk" }, "primary"),
       ],
     ],
   };

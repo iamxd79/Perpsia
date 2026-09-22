@@ -2692,7 +2692,7 @@ async function showScanBucket(chatId, messageId, bucket) {
   const text = [bucket === "watchlist" ? "CURRENT WATCHLIST" : "TOP SETUPS", "", ...selected.map((signal) => formatSignalCard(signal))].join("\n\n");
   const rows = [];
   for (const signal of selected) rows.push(...signalReplyMarkup(signal, { venue: latest.venue }).inline_keyboard);
-  rows.push([{ text: "Back to Summary", callback_data: "scan_view:summary" }]);
+  rows.push([{ text: "↩ Back to Summary", callback_data: "scan_view:summary", style: "primary" }]);
   return safeEditMessage(chatId, messageId, text, { reply_markup: { inline_keyboard: rows } });
 }
 
@@ -3158,14 +3158,14 @@ async function runAlphaScan(chatId) {
     latestScansByChat.set(String(chatId), { result, venue, mode: "alpha", alphaCandidates });
     if (!alphaCandidates.length) {
       return safeEditMessage(chatId, loading.message_id, "ALPHA SCAN COMPLETE\n\nNo early-momentum candidates had enough verified DEX data.", {
-        reply_markup: { inline_keyboard: [[{ text: "Run Again", callback_data: "alpha_again" }]] },
+        reply_markup: { inline_keyboard: [[{ text: "🔄 Run Again", callback_data: "alpha_again", style: "primary" }]] },
       });
     }
 
     const selected = alphaCandidates.slice(0, 3);
     const rows = [];
     for (const signal of selected) rows.push(...signalReplyMarkup(signal, { venue, alpha: true }).inline_keyboard);
-    rows.push([{ text: "Run Again", callback_data: "alpha_again" }]);
+    rows.push([{ text: "🔄 Run Again", callback_data: "alpha_again", style: "primary" }]);
     return safeEditMessage(
       chatId,
       loading.message_id,
