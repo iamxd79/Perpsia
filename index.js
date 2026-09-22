@@ -130,6 +130,7 @@ const {
   refreshPositions: refreshPaperPositions,
   startPaperTradingMonitor,
 } = require("./services/paperTrading");
+const { renderPaperPnlCard } = require("./services/paperCard");
 const { getAdminStats, getAdminUsers, getLeaderboard, getUserStats, isAdmin, markUserStatus, trackUser } = require("./services/userAnalytics");
 
 
@@ -2527,6 +2528,17 @@ bot.onText(/^\/help(?:@\w+)?$/i, async (msg) => {
 });
 
 
+async function sendPaperCard(chatId, position, messageId = null) {
+  const options = paperPositionKeyboard(position.id);
+  try {
+    const image = await renderPaperPnlCard(position);
+    if (messageId) await bot.deleteMessage(chatId, messageId).catch(() => {});
+    return bot.sendPhoto(chatId, image, { caption: "Live paper PnL · " + position.symbol, ...options });
+  } catch (error) {
+    console.error("Paper PnL card render failed:", error.message);
+    return bot.sendMessage(chatId, formatPaperPosition(position), options);
+  }
+}
 function paperPositionKeyboard(positionId) {
   return {
     reply_markup: {
@@ -2576,7 +2588,7 @@ async function handlePaperRequest(chatId, request) {
   if (request.action === "open") {
     try {
       const position = await openPaperPosition(chatId, request);
-      return bot.sendMessage(chatId, "✅ PAPER POSITION OPENED\n\n" + formatPaperPosition(position), paperPositionKeyboard(position.id));
+      return sendPaperCard(chatId, position);
     } catch (error) {
       return bot.sendMessage(chatId, "PAPER TRADE NOT OPENED\n\n" + error.message + "\n\n" + paperHelp());
     }
@@ -2589,7 +2601,7 @@ async function handlePaperRequest(chatId, request) {
       if (result.closed.includes(position)) {
         await bot.sendMessage(chatId, formatPaperClosed(position));
       } else {
-        await bot.sendMessage(chatId, formatPaperPosition(position), paperPositionKeyboard(position.id));
+        await sendPaperCard(chatId, position);
       }
     }
     return;
@@ -5191,8 +5203,8 @@ bot.on("callback_query", async (query) => {
       const result = await refreshPaperPositions(chatId);
       const updated = result.updated.find((position) => position.id === positionId);
       const closed = result.closed.find((position) => position.id === positionId);
-      if (closed) return safeEditMessage(chatId, messageId, "PAPER POSITION CLOSED AUTOMATICALLY\n\n" + formatPaperClosed(closed));
-      return safeEditMessage(chatId, messageId, formatPaperPosition(updated || owned), paperPositionKeyboard(positionId));
+      if (closed) return bot.sendMessage(chatId, "PAPER POSITION CLOSED AUTOMATICALLY\n\n" + formatPaperClosed(closed));
+      return sendPaperCard(chatId, updated || owned, messageId);
     }
 
     if (action.startsWith("paper_close:")) {
@@ -5202,7 +5214,7 @@ bot.on("callback_query", async (query) => {
       const result = await refreshPaperPositions(chatId);
       const current = result.updated.find((position) => position.id === positionId) || owned;
       const closed = closePaperPosition(current.id, current.mark_price, "MANUAL");
-      return safeEditMessage(chatId, messageId, "PAPER POSITION CLOSED\n\n" + formatPaperClosed(closed));
+      return bot.sendMessage(chatId, "PAPER POSITION CLOSED\n\n" + formatPaperClosed(closed));
     }
     if (action === "scan_market") {
       return runManualScan(chatId, preferredVenue(chatId));
