@@ -145,6 +145,7 @@ const { verifyPrivyAccessToken } = require("./services/privyAuth");
 const { getPrivyUserWallets } = require("./services/privyAuth");
 const { getAccountOverview, saveAccountPreferences, saveAccountRisk } = require("./services/accountData");
 const { getUserWallets, linkWallet, unlinkWallet, setPrimaryWallet } = require("./services/wallets");
+const { recordAccountAnalysis } = require("./services/accountActivity");
 
 
 
@@ -4212,6 +4213,14 @@ Please wait for it to finish.`
 
 
     saveAssetState(result);
+    recordAccountAnalysis(chatId, {
+      symbol,
+      venue,
+      analysisType: options.mode === "alpha" ? "early_alpha" : "asset_analysis",
+      requestSource: "telegram",
+      signalReference: result.lifecycleStage || result.category || null,
+      metadata: { actionable: Boolean(result.isActionable), score: result.score ?? null },
+    });
 
 
 

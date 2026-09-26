@@ -1,0 +1,31 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const Database = require("better-sqlite3");
+const os = require("node:os");
+const path = require("node:path");
+const fs = require("node:fs");
+const { buildPlan, report } = require("../scripts/migrate-sqlite-to-postgres");
+
+test("SQLite migration planning is repeatable and reports ambiguous legacy paper rows", () => {
+  const file = path.join(os.tmpdir(), `perpsia-migration-${process.pid}-${Date.now()}.db`);
+  const db = new Database(file);
+  db.exec(`CREATE TABLE perpsia_accounts(account_id TEXT PRIMARY KEY,status TEXT,created_at TEXT,updated_at TEXT);
+    CREATE TABLE perpsia_identities(account_id TEXT,provider TEXT,subject TEXT,metadata_json TEXT,created_at TEXT,last_seen_at TEXT);
+    CREATE TABLE account_wallets(account_id TEXT,chain_namespace TEXT,chain_id TEXT,address_normalized TEXT,address_display TEXT,wallet_type TEXT,provider TEXT,custody TEXT,ownership_status TEXT,is_primary INTEGER,metadata_json TEXT,created_at TEXT,updated_at TEXT);
+    CREATE TABLE account_preferences(account_id TEXT,preferred_exchange TEXT,alert_frequency TEXT,signal_sensitivity TEXT,updated_at TEXT);
+    CREATE TABLE account_risk_profiles(account_id TEXT,capital REAL,risk_percent REAL,max_leverage REAL,updated_at TEXT);
+    CREATE TABLE account_watchlist(account_id TEXT,symbol TEXT,created_at TEXT);
+    CREATE TABLE paper_positions(id INTEGER,chat_id TEXT,symbol TEXT,venue TEXT,direction TEXT,margin REAL,leverage REAL,notional REAL,quantity REAL,entry_price REAL,mark_price REAL,stop_loss REAL,take_profit REAL,status TEXT,realized_pnl REAL,exit_price REAL,exit_reason TEXT,opened_at TEXT,closed_at TEXT);`);
+  db.prepare("INSERT INTO perpsia_accounts VALUES ('11111111-1111-1111-1111-111111111111','active','2026-01-01','2026-01-01')").run();
+  db.prepare("INSERT INTO perpsia_identities VALUES ('11111111-1111-1111-1111-111111111111','telegram','42','{}','2026-01-01','2026-01-01')").run();
+  db.prepare("INSERT INTO paper_positions VALUES (1,'42','BTCUSDT','Binance','LONG',100,5,500,0.01,50000,50000,NULL,NULL,'OPEN',NULL,NULL,NULL,'2026-01-01',NULL)").run();
+  db.prepare("INSERT INTO paper_positions VALUES (2,'orphan','ETHUSDT','Binance','SHORT',100,5,500,0.01,3000,3000,NULL,NULL,'OPEN',NULL,NULL,NULL,'2026-01-01',NULL)").run();
+  const first = report(buildPlan(db));
+  const second = report(buildPlan(db));
+  assert.deepEqual(second, first);
+  assert.equal(first.accounts, 1);
+  assert.equal(first.paperPositions, 1);
+  assert.equal(first.conflicts, 1);
+  db.close();
+  fs.rmSync(file, { force: true });
+});

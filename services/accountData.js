@@ -117,7 +117,8 @@ function getAccountOverview(accountId) {
   const account = db.prepare("SELECT account_id, status, created_at, updated_at FROM perpsia_accounts WHERE account_id = ?").get(id);
   if (!account) return null;
   const identities = require("./accountIdentity").getAccountIdentities(id).map((item) => ({ provider: item.provider, createdAt: item.created_at, lastSeenAt: item.last_seen_at }));
-  return { account, identities, preferences: getAccountPreferences(id), risk: getAccountRisk(id), watchlist: getAccountWatchlist(id) };
+  const analyses = require("./accountActivity").getAccountAnalyses(id);
+  return { account, identities, preferences: getAccountPreferences(id), risk: getAccountRisk(id), watchlist: getAccountWatchlist(id), analyses };
 }
 
 function getAccountIdForPrivy(subject) { return getIdentity("privy", subject)?.account_id || null; }
