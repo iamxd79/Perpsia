@@ -4,14 +4,18 @@
 // Prevents overlapping requests, implements exponential backoff, and handles rate limits
 
 class RequestQueue {
-  constructor(maxConcurrent = 1, maxRetries = 3) {
+  constructor(maxConcurrent = 1, maxRetries = 3, maxQueueSize = 100) {
     this.queue = [];
     this.running = 0;
     this.maxConcurrent = maxConcurrent;
     this.maxRetries = maxRetries;
+    this.maxQueueSize = maxQueueSize;
   }
 
   async add(fn, priority = 0) {
+    if (this.queue.length >= this.maxQueueSize) {
+      throw new Error("Request queue is full; try again shortly.");
+    }
     return new Promise((resolve, reject) => {
       this.queue.push({
         fn,

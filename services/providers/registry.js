@@ -20,6 +20,7 @@ const definitions = new Map();
 const caches = new Map();
 const health = new Map();
 const breakers = new Map();
+const MAX_PROVIDER_CACHE_ENTRIES = 1000;
 
 function providerKey(provider, context = {}) {
   return String(context.cacheKey || context.symbol || "global").toUpperCase();
@@ -203,6 +204,15 @@ async function collectProvider(id, context = {}) {
 
   const key = providerKey(id, context);
   const cacheKey = id + ":" + key;
+  const now = Date.now();
+  if (caches.size >= MAX_PROVIDER_CACHE_ENTRIES) {
+    for (const [entryKey, entry] of caches) {
+      if (entry.expiresAt <= now) caches.delete(entryKey);
+    }
+    while (caches.size >= MAX_PROVIDER_CACHE_ENTRIES) {
+      caches.delete(caches.keys().next().value);
+    }
+  }
   const cached = caches.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     updateHealth(id, { status: "ok", cacheHits: (health.get(id)?.cacheHits || 0) + 1 });

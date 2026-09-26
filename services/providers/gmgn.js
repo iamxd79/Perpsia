@@ -10,6 +10,7 @@ const DEFAULT_HOST = "https://openapi.gmgn.ai";
 const CACHE_TTL_MS = 60000;
 const MAX_LIST_ITEMS = 20;
 const cache = new Map();
+const MAX_CACHE_ENTRIES = 500;
 const gmgnCircuitBreaker = new CircuitBreaker(4, 120000, { name: "GMGN read-only API" });
 
 const READ_ONLY_ENDPOINTS = Object.freeze({
@@ -136,7 +137,14 @@ async function cachedRequest(method, path, query, body, options = {}) {
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
   const value = await request(method, path, query, body, options);
-  cache.set(cacheKey, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+  const now = Date.now();
+  for (const [entryKey, entry] of cache) {
+    if (entry.expiresAt <= now) cache.delete(entryKey);
+  }
+  while (cache.size >= MAX_CACHE_ENTRIES) {
+    cache.delete(cache.keys().next().value);
+  }
+  cache.set(cacheKey, { value, expiresAt: now + CACHE_TTL_MS });
   return value;
 }
 

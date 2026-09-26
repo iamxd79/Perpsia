@@ -1095,6 +1095,16 @@ bot.on("polling_error", (error) => {
 
 let isAnalyzeRunning = false;
 const latestScansByChat = new Map();
+const MAX_LATEST_SCANS = 500;
+
+function rememberLatestScan(chatId, value) {
+  const key = String(chatId);
+  latestScansByChat.delete(key);
+  latestScansByChat.set(key, { ...value, savedAt: Date.now() });
+  while (latestScansByChat.size > MAX_LATEST_SCANS) {
+    latestScansByChat.delete(latestScansByChat.keys().next().value);
+  }
+}
 
 
 
@@ -3200,7 +3210,7 @@ async function runManualScan(chatId, venue = "Binance") {
       storeSignal(signal, "manual_scan");
     }
     recordScan("manual", "success");
-    latestScansByChat.set(String(chatId), { result, venue, mode: "scan" });
+    rememberLatestScan(chatId, { result, venue, mode: "scan" });
     await safeEditMessage(
       chatId,
       loading.message_id,
@@ -3281,7 +3291,7 @@ async function runAlphaScan(chatId) {
       ))
       .sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
 
-    latestScansByChat.set(String(chatId), { result, venue, mode: "alpha", alphaCandidates });
+    rememberLatestScan(chatId, { result, venue, mode: "alpha", alphaCandidates });
     if (!alphaCandidates.length) {
       return safeEditMessage(chatId, loading.message_id, "ALPHA SCAN COMPLETE\n\nNo early-momentum candidates had enough verified DEX data.", {
         reply_markup: { inline_keyboard: [[{ text: "🔄 Run Again", callback_data: "alpha_again", style: "primary" }]] },

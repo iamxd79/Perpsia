@@ -9,6 +9,7 @@ const { analyzeSMC, atr, normalizeCandles } = require("./smcAnalysis");
 
 const BINANCE_FUTURES = "https://fapi.binance.com";
 const cache = new Map();
+const MAX_TECHNICAL_CACHE_ENTRIES = 300;
 const breaker = new CircuitBreaker(4, 60000, { name: "Binance OHLCV" });
 
 function number(value) {
@@ -119,7 +120,14 @@ async function fetchBinanceCandles(symbol, options = {}) {
   );
   const candles = normalizeCandles(response.data);
   if (candles.length < 20) throw new Error("Binance returned insufficient OHLCV data");
-  cache.set(cacheKey, { candles, timestamp: Date.now() });
+  const now = Date.now();
+  for (const [entryKey, entry] of cache) {
+    if (now - entry.timestamp >= cacheTtlMs) cache.delete(entryKey);
+  }
+  while (cache.size >= MAX_TECHNICAL_CACHE_ENTRIES) {
+    cache.delete(cache.keys().next().value);
+  }
+  cache.set(cacheKey, { candles, timestamp: now });
   return candles;
 }
 

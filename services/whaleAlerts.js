@@ -149,6 +149,18 @@ const DEFAULT_ASSET_REGISTRY = {
 
 const publicCache = new Map();
 const priceCache = new Map();
+const MAX_CACHE_ENTRIES = 500;
+
+function setBoundedCache(cache, key, value, timestamp, ttlMs) {
+  const now = Date.now();
+  for (const [entryKey, entry] of cache) {
+    if (now - entry.timestamp >= ttlMs) cache.delete(entryKey);
+  }
+  while (cache.size >= MAX_CACHE_ENTRIES) {
+    cache.delete(cache.keys().next().value);
+  }
+  cache.set(key, { ...value, timestamp });
+}
 
 
 function normalizeSymbol(symbol) {
@@ -466,10 +478,7 @@ async function getPriceUsd(symbol, config) {
     if (value === null || value <= 0) return null;
 
 
-    priceCache.set(priceSymbol, {
-      timestamp: Date.now(),
-      value,
-    });
+    setBoundedCache(priceCache, priceSymbol, { value }, Date.now(), CACHE_TTL_MS);
 
 
     return value;
@@ -1195,10 +1204,7 @@ async function checkWhaleActivity(symbol, options = {}) {
 
 
     if (activity.status !== "unavailable" && !(activity.warnings || []).length) {
-      publicCache.set(cacheKey, {
-        timestamp: Date.now(),
-        data: activity,
-      });
+      setBoundedCache(publicCache, cacheKey, { data: activity }, Date.now(), CACHE_TTL_MS);
     }
 
 

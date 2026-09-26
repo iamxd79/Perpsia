@@ -154,6 +154,7 @@ const GOPLUS = "https://api.gopluslabs.io";
 const HONEYPOT = "https://api.honeypot.is";
 const GITHUB = "https://api.github.com";
 const liquiditySnapshots = new Map();
+const MAX_LIQUIDITY_SNAPSHOTS = 500;
 
 
 
@@ -3724,6 +3725,9 @@ async function collectMarketEvidence(symbol, options = {}) {
     const metadata = { ...record.metadata };
     if (previous !== undefined && previous > 0) {
       metadata.liquidityChangePct = ((record.liquidity - previous) / previous) * 100;
+    }
+    while (liquiditySnapshots.size >= MAX_LIQUIDITY_SNAPSHOTS) {
+      liquiditySnapshots.delete(liquiditySnapshots.keys().next().value);
     }
     liquiditySnapshots.set(snapshotKey, record.liquidity);
     return { ...record, metadata };

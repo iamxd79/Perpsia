@@ -26,6 +26,18 @@ const MAX_WATCHED_ADDRESSES = 20;
 const activityCache = new Map();
 const metadataCache = new Map();
 const balanceCache = new Map();
+const MAX_CACHE_ENTRIES = 500;
+
+function setBoundedCache(cache, key, value, expiresAt) {
+  const now = Date.now();
+  for (const [entryKey, entry] of cache) {
+    if (entry.expiresAt <= now) cache.delete(entryKey);
+  }
+  while (cache.size >= MAX_CACHE_ENTRIES) {
+    cache.delete(cache.keys().next().value);
+  }
+  cache.set(key, { value, expiresAt });
+}
 
 const NETWORKS = {
   ethereum: { slug: "eth-mainnet", blockTimeSeconds: 12 },
@@ -157,7 +169,7 @@ async function fetchTokenMetadata(network, contract, options = {}) {
     decimals: Number.isInteger(Number(value?.decimals)) ? Number(value.decimals) : null,
     logo: value?.logo || null,
   };
-  metadataCache.set(cacheKey, { value: metadata, expiresAt: Date.now() + 60 * 60 * 1000 });
+  setBoundedCache(metadataCache, cacheKey, metadata, Date.now() + 60 * 60 * 1000);
   return metadata;
 }
 
@@ -171,7 +183,7 @@ async function fetchTokenBalances(network, address, options = {}) {
     tokenBalance: item.tokenBalance || null,
     error: item.error || null,
   }));
-  balanceCache.set(cacheKey, { value: balances, expiresAt: Date.now() + 120000 });
+  setBoundedCache(balanceCache, cacheKey, balances, Date.now() + 120000);
   return balances;
 }
 
@@ -339,7 +351,7 @@ async function collectAlchemyActivity(symbol, options = {}) {
   }, warnings, unpricedTransfers, assets);
   result.watchedAddresses = watchedAddresses(assets);
   result.networks = getAlchemyNetworks(options);
-  activityCache.set(cacheKey, { value: result, expiresAt: Date.now() + CACHE_TTL_MS });
+  setBoundedCache(activityCache, cacheKey, result, Date.now() + CACHE_TTL_MS);
   increment("perpsia_onchain_events_total", { provider: "alchemy", status: moves.length ? "ok" : "empty" }, moves.length || 1);
   return result;
 }

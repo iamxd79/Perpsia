@@ -102,6 +102,7 @@ function scanDeadlineReached(deadlineAt, reserveMs = 0) {
 
 // Simple in-memory cache for fallback
 const resultCache = new Map();
+const MAX_RESULT_CACHE_ENTRIES = 200;
 
 
 
@@ -346,9 +347,16 @@ function getCachedResult(cacheKey) {
 
 
 function setCachedResult(cacheKey, data) {
+  const now = Date.now();
+  for (const [key, entry] of resultCache) {
+    if (now - entry.timestamp >= 3600000) resultCache.delete(key);
+  }
+  while (resultCache.size >= MAX_RESULT_CACHE_ENTRIES) {
+    resultCache.delete(resultCache.keys().next().value);
+  }
   resultCache.set(cacheKey, {
     data,
-    timestamp: Date.now(),
+    timestamp: now,
   });
 }
 
