@@ -1,0 +1,12 @@
+"use strict";
+
+const { openDatabase } = require("./database");
+const db = openDatabase();
+db.exec(`CREATE TABLE IF NOT EXISTS account_entitlements (account_id TEXT NOT NULL, tier TEXT NOT NULL, source TEXT NOT NULL, expires_at TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(account_id, tier, source));`);
+const DEFAULT_TIERS = { FREE: { analysesPerDay: 10, paperTrading: true, advancedSignals: false, privateStats: true }, PRO: { analysesPerDay: 100, paperTrading: true, advancedSignals: true, privateStats: true }, ELITE: { analysesPerDay: 1000, paperTrading: true, advancedSignals: true, privateStats: true } };
+const features = { advancedSignals: "advancedSignals", paperTrading: "paperTrading", privateStats: "privateStats" };
+function getTierConfig() { try { return { ...DEFAULT_TIERS, ...(JSON.parse(process.env.PERPSIA_ENTITLEMENT_TIERS_JSON || "{}")) }; } catch { return DEFAULT_TIERS; } }
+function grantEntitlement(accountId, tier = "FREE", source = "system", expiresAt = null, metadata = {}) { db.prepare(`INSERT INTO account_entitlements(account_id,tier,source,expires_at,metadata_json,updated_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(account_id,tier,source) DO UPDATE SET expires_at=excluded.expires_at,metadata_json=excluded.metadata_json,updated_at=CURRENT_TIMESTAMP`).run(String(accountId), String(tier).toUpperCase(), String(source), expiresAt, JSON.stringify(metadata)); return getAccountEntitlements(accountId); }
+function getAccountEntitlements(accountId, context = {}) { const now = context.now ? new Date(context.now) : new Date(); const rows = db.prepare("SELECT * FROM account_entitlements WHERE account_id = ? ORDER BY tier DESC").all(String(accountId)).filter((row) => !row.expires_at || new Date(row.expires_at) > now); const config = getTierConfig(); const tier = rows.map((row) => row.tier).find((item) => config[item]) || "FREE"; return { accountId: String(accountId), tier, source: rows.find((row) => row.tier === tier)?.source || "default", features: config[tier] || config.FREE, grants: rows.map((row) => ({ tier: row.tier, source: row.source, expiresAt: row.expires_at })) }; }
+function canUseFeature(accountId, feature, context = {}) { const entitlement = getAccountEntitlements(accountId, context); return { allowed: Boolean(entitlement.features[features[feature] || feature]), feature, tier: entitlement.tier, entitlement }; }
+module.exports = { canUseFeature, getAccountEntitlements, grantEntitlement, getTierConfig };

@@ -9,7 +9,7 @@
     "db:migrate": "node scripts/db-migrate.js",
     "db:migrate:dry": "node scripts/db-migrate.js --dry-run",
     "db:sqlite-to-postgres": "node scripts/migrate-sqlite-to-postgres.js",
-    "build:account": "node --check services/accountData.js && node --check services/accountActivity.js && node --check services/wallets.js && node --check services/postgres.js && node --check services/postgresAccountRepository.js && node --check scripts/db-migrate.js && node --check scripts/migrate-sqlite-to-postgres.js"
+    "build:account": "node --check services/accountData.js && node --check services/accountActivity.js && node --check services/accountAlerts.js && node --check services/paperTrading.js && node --check services/wallets.js && node --check services/chainRegistry.js && node --check services/assetRegistry.js && node --check services/tokenBalance.js && node --check services/entitlements.js && node --check services/staking.js && node --check services/postgres.js && node --check services/postgresAccountRepository.js && node --check scripts/db-migrate.js && node --check scripts/migrate-sqlite-to-postgres.js"
   },
   "keywords": [],
   "author": "",

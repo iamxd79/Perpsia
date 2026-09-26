@@ -49,7 +49,7 @@ After reviewing the report, apply only against a prepared staging database:
 node scripts/migrate-sqlite-to-postgres.js --apply
 ```
 
-The current tool migrates accounts, identities, wallets, preferences, risk profiles, watchlists, and paper positions. Global market intelligence tables stay in SQLite because they are not owned by a PerpsIA account. Alerts and analysis history will be migrated once their account-owned source rows are available; the PostgreSQL schema is already prepared for them.
+The current tool migrates accounts, identities, wallets, preferences, risk profiles, watchlists, paper positions, account alerts, analysis history, and usage events. Global market intelligence tables stay in SQLite because they are not owned by a PerpsIA account. Orphaned legacy rows are reported as conflicts and are not copied.
 
 ## Cutover checklist
 

@@ -1,10 +1,12 @@
 const { openDatabase } = require("./database");
+const { resolveAccountIdForChat } = require("./accountData");
 
 const db = openDatabase();
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS paper_positions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT,
     chat_id TEXT NOT NULL,
     symbol TEXT NOT NULL,
     venue TEXT NOT NULL DEFAULT 'Binance',
@@ -27,6 +29,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_paper_positions_chat_status
     ON paper_positions(chat_id, status);
 `);
+
+try { db.prepare("ALTER TABLE paper_positions ADD COLUMN account_id TEXT").run(); } catch {}
+db.prepare("CREATE INDEX IF NOT EXISTS idx_paper_positions_account_status ON paper_positions(account_id, status)").run();
 
 function number(value) {
   const parsed = Number(value);
@@ -139,16 +144,18 @@ function validateOrder(order) {
 
 async function openPosition(chatId, order, fetchImpl) {
   validateOrder(order);
-  const existing = db.prepare("SELECT id FROM paper_positions WHERE chat_id = ? AND symbol = ? AND status = 'OPEN'").get(String(chatId), order.symbol);
+  const accountId = resolveAccountIdForChat(chatId);
+  db.prepare("UPDATE paper_positions SET account_id = ? WHERE chat_id = ? AND (account_id IS NULL OR account_id = '')").run(accountId, String(chatId));
+  const existing = db.prepare("SELECT id FROM paper_positions WHERE account_id = ? AND symbol = ? AND status = 'OPEN'").get(accountId, order.symbol);
   if (existing) throw new Error(`You already have an open paper position on ${displaySymbol(order.symbol)}. Close it first.`);
   const entryPrice = await fetchMarkPrice(order.symbol, order.venue, fetchImpl);
   const notional = order.margin * order.leverage;
   const quantity = notional / entryPrice;
   const result = db.prepare(`
     INSERT INTO paper_positions
-      (chat_id, symbol, venue, direction, margin, leverage, notional, quantity, entry_price, mark_price, stop_loss, take_profit)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(String(chatId), order.symbol, order.venue, order.direction, order.margin, order.leverage, notional, quantity, entryPrice, entryPrice, order.stopLoss, order.takeProfit);
+      (account_id, chat_id, symbol, venue, direction, margin, leverage, notional, quantity, entry_price, mark_price, stop_loss, take_profit)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(accountId, String(chatId), order.symbol, order.venue, order.direction, order.margin, order.leverage, notional, quantity, entryPrice, entryPrice, order.stopLoss, order.takeProfit);
   return getPosition(result.lastInsertRowid);
 }
 
@@ -157,7 +164,9 @@ function getPosition(id) {
 }
 
 function getOpenPositions(chatId) {
-  return db.prepare("SELECT * FROM paper_positions WHERE chat_id = ? AND status = 'OPEN' ORDER BY id DESC").all(String(chatId));
+  const accountId = resolveAccountIdForChat(chatId);
+  db.prepare("UPDATE paper_positions SET account_id = ? WHERE chat_id = ? AND (account_id IS NULL OR account_id = '')").run(accountId, String(chatId));
+  return db.prepare("SELECT * FROM paper_positions WHERE account_id = ? AND status = 'OPEN' ORDER BY id DESC").all(accountId);
 }
 
 function closePosition(id, exitPrice, reason = "MANUAL") {
@@ -210,9 +219,10 @@ function formatClosed(position) {
 }
 
 async function getStats(chatId, { fetchImpl = globalThis.fetch } = {}) {
+  const accountId = resolveAccountIdForChat(chatId);
   const open = getOpenPositions(chatId);
   const refreshed = await refreshPositions(chatId, { fetchImpl });
-  const closed = db.prepare("SELECT * FROM paper_positions WHERE chat_id = ? AND status = 'CLOSED' ORDER BY id DESC LIMIT 100").all(String(chatId));
+  const closed = db.prepare("SELECT * FROM paper_positions WHERE account_id = ? AND status = 'CLOSED' ORDER BY id DESC LIMIT 100").all(accountId);
   const realized = closed.reduce((sum, row) => sum + Number(row.realized_pnl || 0), 0);
   const unrealized = refreshed.updated.reduce((sum, row) => sum + calculatePnl(row, row.mark_price).pnl, 0);
   const wins = closed.filter((row) => Number(row.realized_pnl) > 0).length;

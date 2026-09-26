@@ -27,6 +27,9 @@ function buildPlan(db) {
     risk: rows(db, "account_risk_profiles"),
     watchlist: rows(db, "account_watchlist"),
     paperPositions: paper,
+    alerts: rows(db, "account_alerts"),
+    analyses: rows(db, "account_analysis_history"),
+    usage: rows(db, "account_usage_events"),
     conflicts,
   };
 }
@@ -41,6 +44,9 @@ function report(plan) {
     riskProfiles: plan.risk.length,
     watchlistRows: plan.watchlist.length,
     paperPositions: plan.paperPositions.filter((row) => row.account_id).length,
+    alerts: plan.alerts.filter((row) => row.account_id).length,
+    analyses: plan.analyses.filter((row) => row.account_id).length,
+    usageEvents: plan.usage.filter((row) => row.account_id).length,
     conflicts: plan.conflicts.length,
   };
 }
@@ -57,6 +63,9 @@ async function applyPlan(plan) {
     for (const row of plan.risk) await client.query("INSERT INTO account_risk_profiles(account_id,capital,risk_percent,max_leverage,updated_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(account_id) DO UPDATE SET capital=EXCLUDED.capital, risk_percent=EXCLUDED.risk_percent, max_leverage=EXCLUDED.max_leverage, updated_at=EXCLUDED.updated_at", [row.account_id, row.capital, row.risk_percent, row.max_leverage, row.updated_at]);
     for (const row of plan.watchlist) await client.query("INSERT INTO account_watchlist(account_id,symbol,created_at) VALUES($1,$2,$3) ON CONFLICT(account_id,symbol) DO NOTHING", [row.account_id, row.symbol, row.created_at]);
     for (const row of plan.paperPositions.filter((item) => item.account_id)) await client.query(`INSERT INTO account_paper_positions(account_id,symbol,venue,direction,margin,leverage,notional,quantity,entry_price,mark_price,stop_loss,take_profit,status,realized_pnl,exit_price,exit_reason,opened_at,closed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`, [row.account_id, row.symbol, row.venue, row.direction, row.margin, row.leverage, row.notional, row.quantity, row.entry_price, row.mark_price, row.stop_loss, row.take_profit, row.status, row.realized_pnl, row.exit_price, row.exit_reason, row.opened_at, row.closed_at]);
+    for (const row of plan.alerts.filter((item) => item.account_id)) await client.query(`INSERT INTO account_alerts(account_id,symbol,alert_type,condition,destinations,status,last_triggered_at,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [row.account_id, row.symbol, row.alert_type, JSON.parse(row.condition_json || "{}"), JSON.parse(row.destinations_json || "[\"telegram\"]"), row.status, row.last_triggered_at, row.created_at, row.updated_at]);
+    for (const row of plan.analyses.filter((item) => item.account_id)) await client.query(`INSERT INTO account_analysis_history(account_id,symbol,venue,analysis_type,request_source,result_reference,signal_reference,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [row.account_id, row.symbol, row.venue, row.analysis_type, row.request_source, row.result_reference, row.signal_reference, JSON.parse(row.metadata_json || "{}"), row.created_at]);
+    for (const row of plan.usage.filter((item) => item.account_id)) await client.query(`INSERT INTO account_usage_events(account_id,event_type,quantity,metadata,created_at) VALUES($1,$2,$3,$4,$5)`, [row.account_id, row.event_type, row.quantity, JSON.parse(row.metadata_json || "{}"), row.created_at]);
     await client.query("COMMIT");
   } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
 }

@@ -146,6 +146,10 @@ const { getPrivyUserWallets } = require("./services/privyAuth");
 const { getAccountOverview, saveAccountPreferences, saveAccountRisk } = require("./services/accountData");
 const { getUserWallets, linkWallet, unlinkWallet, setPrimaryWallet } = require("./services/wallets");
 const { recordAccountAnalysis } = require("./services/accountActivity");
+const { getAccountBalance } = require("./services/tokenBalance");
+const { getAsset } = require("./services/assetRegistry");
+const { getStakingState } = require("./services/staking");
+const { getAccountEntitlements } = require("./services/entitlements");
 
 
 
@@ -802,6 +806,34 @@ async function handleHttpRequest(req, res) {
         const status = notConfigured ? 503 : conflict ? 409 : ownership ? 403 : error.code === "INVALID_PRIVY_TOKEN" ? 401 : 400;
         res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
         res.end(JSON.stringify({ error: conflict ? "wallet_account_conflict" : ownership ? "wallet_not_owned" : error.message }));
+      }
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/account/token") {
+      if (req.method !== "POST") {
+        res.writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" });
+        res.end(JSON.stringify({ error: "Method not allowed" }));
+        return;
+      }
+      if (!authorizeInternalRequest(req, res)) return;
+      let body;
+      try { body = JSON.parse(await readRequestBody(req, 32 * 1024)); } catch {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: "Invalid JSON payload" }));
+        return;
+      }
+      try {
+        const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
+        const identity = getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
+        const asset = getAsset("PERPSIA");
+        const [balance, staking] = await Promise.all([getAccountBalance(identity.account_id, asset), Promise.resolve(getStakingState(identity.account_id, asset.symbol))]);
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ asset, balance, staking, entitlements: getAccountEntitlements(identity.account_id) }));
+      } catch (error) {
+        const status = error.code === "PRIVY_NOT_CONFIGURED" ? 503 : error.code === "INVALID_PRIVY_TOKEN" ? 401 : 400;
+        res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: error.message }));
       }
       return;
     }

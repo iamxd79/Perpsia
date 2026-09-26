@@ -9,6 +9,8 @@ const { getOrCreateTelegramAccount, getOrCreateIdentity } = require("../services
 const { addAccountWatchlist, getAccountOverview, getAccountRisk, saveAccountPreferences, saveAccountRisk } = require("../services/accountData");
 const { addToWatchlist, getRiskSettings, getUserPreferences, saveRiskSettings, saveUserPreferences } = require("../services/memory");
 const { getPrimaryWallet, getUserWallets, linkWallet, resolveAccountByWallet, setPrimaryWallet, unlinkWallet } = require("../services/wallets");
+const { openPosition, getOpenPositions } = require("../services/paperTrading");
+const { createAccountAlert, listAccountAlerts, updateAccountAlert, deleteAccountAlert } = require("../services/accountAlerts");
 
 test("Telegram state resolves through one account and remains visible to the web overview", () => {
   const identity = getOrCreateTelegramAccount("account-data-telegram");
@@ -36,4 +38,17 @@ test("wallet ownership is unique, supports multiple wallets, and protects primar
   assert.equal(getPrimaryWallet(account.account_id).walletId, second.walletId);
   unlinkWallet(account.account_id, first.walletId);
   assert.equal(getUserWallets(account.account_id).length, 1);
+});
+
+test("paper positions and alerts are isolated by internal account ownership", async () => {
+  const first = getOrCreateTelegramAccount("account-owner-one");
+  const second = getOrCreateTelegramAccount("account-owner-two");
+  await openPosition("account-owner-one", { direction: "LONG", symbol: "BTCUSDT", margin: 100, leverage: 2, stopLoss: null, takeProfit: null, venue: "Binance" }, async () => ({ ok: true, json: async () => ({ price: "50000" }) }));
+  assert.equal(getOpenPositions("account-owner-one").length, 1);
+  assert.equal(getOpenPositions("account-owner-two").length, 0);
+  const alert = createAccountAlert(first.account_id, { symbol: "BTCUSDT", alertType: "price", condition: { above: 60000 } });
+  assert.equal(listAccountAlerts(first.account_id).length, 1);
+  assert.equal(listAccountAlerts(second.account_id).length, 0);
+  assert.equal(updateAccountAlert(second.account_id, alert.alertId, { status: "paused" }), null);
+  assert.equal(deleteAccountAlert(first.account_id, alert.alertId), true);
 });
