@@ -2,6 +2,7 @@
 
 const PUBLIC_COMMANDS = [
   { command: "start", description: "Open PerpsIA" },
+  { command: "account", description: "Connect PerpsIA account" },
   { command: "scan", description: "Find current perp setups" },
   { command: "analyze", description: "Analyze one asset" },
   { command: "alpha", description: "Find early momentum" },
@@ -47,6 +48,7 @@ const HELP_MESSAGE = [
   "/mystats",
   "",
   "Manage",
+  "/account",
   "/risk",
   "/watchlist",
   "/settings",

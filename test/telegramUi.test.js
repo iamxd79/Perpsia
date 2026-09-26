@@ -28,10 +28,11 @@ test("registers the public Telegram command menu", async () => {
   assert.deepEqual(received, PUBLIC_COMMANDS);
   assert.deepEqual(
     received.map(({ command }) => command),
-    ["start", "scan", "analyze", "alpha", "risk", "watchlist", "history", "compare", "backtest", "paper", "mystats", "performance", "status", "settings", "help", "about"]
+    ["start", "account", "scan", "analyze", "alpha", "risk", "watchlist", "history", "compare", "backtest", "paper", "mystats", "performance", "status", "settings", "help", "about"]
   );
   assert.deepEqual(Object.fromEntries(received.map(({ command, description }) => [command, description])), {
     start: "Open PerpsIA",
+    account: "Connect PerpsIA account",
     scan: "Find current perp setups",
     analyze: "Analyze one asset",
     alpha: "Find early momentum",

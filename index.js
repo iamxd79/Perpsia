@@ -134,6 +134,14 @@ const {
 } = require("./services/paperTrading");
 const { renderPaperClosedCard, renderPaperPnlCard } = require("./services/paperCard");
 const { getAdminStats, getAdminUsers, getLeaderboard, getUserStats, isAdmin, markUserStatus, trackUser } = require("./services/userAnalytics");
+const { createTelegramLinkSession } = require("./services/accountIdentity");
+const {
+  consumeTelegramLinkSession,
+  getAccountIdentities,
+  getOrCreateIdentity,
+  inspectTelegramLinkSession,
+} = require("./services/accountIdentity");
+const { verifyPrivyAccessToken } = require("./services/privyAuth");
 
 
 
@@ -616,6 +624,103 @@ async function handleHttpRequest(req, res) {
         "Cache-Control": "no-store",
       });
       res.end(renderPrometheus());
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/account/link/inspect") {
+      if (req.method !== "POST") {
+        res.writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" });
+        res.end(JSON.stringify({ error: "Method not allowed" }));
+        return;
+      }
+      if (!authorizeInternalRequest(req, res)) return;
+      let body;
+      try {
+        body = JSON.parse(await readRequestBody(req, 32 * 1024));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: "Invalid JSON payload" }));
+        return;
+      }
+      const result = inspectTelegramLinkSession(body?.token);
+      res.writeHead(result.status === "valid" ? 200 : 400, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      res.end(JSON.stringify(result));
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/account/link/consume") {
+      if (req.method !== "POST") {
+        res.writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" });
+        res.end(JSON.stringify({ error: "Method not allowed" }));
+        return;
+      }
+      if (!authorizeInternalRequest(req, res)) return;
+      let body;
+      try {
+        body = JSON.parse(await readRequestBody(req, 64 * 1024));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: "Invalid JSON payload" }));
+        return;
+      }
+      try {
+        const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
+        const identity = consumeTelegramLinkSession(
+          body?.token,
+          "privy",
+          verified.user_id,
+          { sessionId: verified.session_id },
+        );
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end(JSON.stringify({ accountId: identity.account_id, provider: identity.provider }));
+      } catch (error) {
+        const conflict = /already linked to another/i.test(error.message);
+        const status = error.code === "PRIVY_NOT_CONFIGURED" ? 503 : conflict ? 409 : 401;
+        res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: conflict ? "account_conflict" : error.message }));
+      }
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/account/me") {
+      if (req.method !== "POST") {
+        res.writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" });
+        res.end(JSON.stringify({ error: "Method not allowed" }));
+        return;
+      }
+      if (!authorizeInternalRequest(req, res)) return;
+      let body;
+      try {
+        body = JSON.parse(await readRequestBody(req, 32 * 1024));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: "Invalid JSON payload" }));
+        return;
+      }
+      try {
+        const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
+        const identity = getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
+        const identities = getAccountIdentities(identity.account_id).map((item) => ({
+          provider: item.provider,
+          createdAt: item.created_at,
+          lastSeenAt: item.last_seen_at,
+        }));
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end(JSON.stringify({ accountId: identity.account_id, identities }));
+      } catch (error) {
+        const status = error.code === "PRIVY_NOT_CONFIGURED" ? 503 : 401;
+        res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: error.message }));
+      }
       return;
     }
 
@@ -4528,6 +4633,28 @@ bot.on("my_chat_member", (update) => {
   const chatId = update?.chat?.id;
   const status = update?.new_chat_member?.status;
   if (chatId && (status === "kicked" || status === "left")) markUserStatus(chatId, "blocked");
+});
+
+bot.onText(/^\/account(?:@\w+)?$/i, async (msg) => {
+  try {
+    const session = createTelegramLinkSession(msg.chat.id, {
+      metadata: {
+        username: msg.from?.username || null,
+        firstName: msg.from?.first_name || null,
+      },
+    });
+    return bot.sendMessage(msg.chat.id, [
+      "PERPSIA ACCOUNT",
+      "",
+      "Open this secure link to continue on the PerpsIA dashboard:",
+      session.url,
+      "",
+      "The link expires in 10 minutes and can only be used once.",
+    ].join("\n"));
+  } catch (error) {
+    console.error("Account link creation failed:", error);
+    return bot.sendMessage(msg.chat.id, "Account linking is temporarily unavailable. Please try again shortly.");
+  }
 });
 bot.onText(/^\/mystats(?:@\w+)?$/i, async (msg) => {
   return bot.sendMessage(msg.chat.id, formatPrivateStats(msg.chat.id));

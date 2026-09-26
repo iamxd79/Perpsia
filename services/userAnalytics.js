@@ -1,4 +1,5 @@
 const { openDatabase } = require("./database");
+const { getOrCreateTelegramAccount } = require("./accountIdentity");
 
 const db = openDatabase();
 
@@ -22,20 +23,34 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_bot_user_events_chat ON bot_user_events(chat_id, created_at);
 `);
 
+try {
+  db.prepare("ALTER TABLE bot_users ADD COLUMN account_id TEXT").run();
+} catch {}
+
 function trackUser(msg, eventType = "message", metadata = {}) {
   const chatId = String(msg?.chat?.id || msg?.from?.id || "");
   if (!chatId) return null;
   const user = msg?.from || msg?.chat?.user || {};
+  let accountId = null;
+  try {
+    accountId = getOrCreateTelegramAccount(chatId, {
+      username: user.username || null,
+      firstName: user.first_name || null,
+    }).account_id;
+  } catch (error) {
+    console.error("Account identity sync failed:", error.message);
+  }
   db.prepare(`
-    INSERT INTO bot_users (chat_id, username, first_name, status, last_seen_at, blocked_at)
-    VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP, NULL)
+    INSERT INTO bot_users (chat_id, account_id, username, first_name, status, last_seen_at, blocked_at)
+    VALUES (?, ?, ?, ?, 'active', CURRENT_TIMESTAMP, NULL)
     ON CONFLICT(chat_id) DO UPDATE SET
+      account_id = COALESCE(excluded.account_id, bot_users.account_id),
       username = COALESCE(excluded.username, bot_users.username),
       first_name = COALESCE(excluded.first_name, bot_users.first_name),
       status = 'active',
       last_seen_at = CURRENT_TIMESTAMP,
       blocked_at = NULL
-  `).run(chatId, user.username || null, user.first_name || null);
+  `).run(chatId, accountId, user.username || null, user.first_name || null);
   db.prepare("INSERT INTO bot_user_events (chat_id, event_type, metadata_json) VALUES (?, ?, ?)")
     .run(chatId, eventType, JSON.stringify(metadata || {}));
   return chatId;
@@ -82,7 +97,7 @@ function getAdminStats() {
 }
 
 function getAdminUsers(limit = 50) {
-  return db.prepare("SELECT chat_id, username, first_name, status, first_seen_at, last_seen_at, blocked_at FROM bot_users ORDER BY last_seen_at DESC LIMIT ?").all(Math.min(200, Math.max(1, Number(limit) || 50)));
+  return db.prepare("SELECT chat_id, account_id, username, first_name, status, first_seen_at, last_seen_at, blocked_at FROM bot_users ORDER BY last_seen_at DESC LIMIT ?").all(Math.min(200, Math.max(1, Number(limit) || 50)));
 }
 
 function getLeaderboard(limit = 20) {
