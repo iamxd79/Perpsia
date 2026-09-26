@@ -10,6 +10,7 @@
     "db:migrate:dry": "node scripts/db-migrate.js --dry-run",
     "db:sqlite-to-postgres": "node scripts/migrate-sqlite-to-postgres.js",
     "db:staging:validate": "node scripts/staging-validate.js",
+    "contracts:compile": "node scripts/compile-contracts.js",
     "build:account": "node --check services/accountData.js && node --check services/accountActivity.js && node --check services/accountAlerts.js && node --check services/paperTrading.js && node --check services/wallets.js && node --check services/chainRegistry.js && node --check services/assetRegistry.js && node --check services/tokenBalance.js && node --check services/tokenHealth.js && node --check services/entitlements.js && node --check services/staking.js && node --check services/postgres.js && node --check services/postgresAccountRepository.js && node --check scripts/db-migrate.js && node --check scripts/migrate-sqlite-to-postgres.js && node --check scripts/staging-validate.js"
   },
   "keywords": [],
@@ -28,5 +29,8 @@
     "openai": "^6.45.0",
     "pg": "^8.23.0",
     "sharp": "^0.35.4"
+  },
+  "devDependencies": {
+    "solc": "^0.8.24"
   }
 }

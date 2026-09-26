@@ -1,0 +1,11 @@
+{
+  "network": "robinhood-testnet",
+  "chainId": "46630",
+  "rpcUrlEnv": "PERPSIA_ROBINHOOD_TESTNET_RPC_URL",
+  "tokenSymbol": "PERPSIA_TEST",
+  "tokenAddress": "",
+  "stakingAddress": "",
+  "deploymentTransaction": "",
+  "deploymentBlock": "",
+  "status": "not_deployed"
+}
