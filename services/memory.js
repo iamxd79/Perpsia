@@ -1,4 +1,14 @@
 const { openDatabase, getStorageInfo } = require("./database");
+const {
+  resolveAccountIdForChat,
+  getAccountPreferences,
+  saveAccountPreferences,
+  getAccountRisk,
+  saveAccountRisk,
+  getAccountWatchlist,
+  addAccountWatchlist,
+  removeAccountWatchlist,
+} = require("./accountData");
 
 
 // ==========================================
@@ -257,6 +267,8 @@ function getLastAlert(symbol) {
 
 
 function saveRiskSettings(chatId, capital, riskPercent, maxLeverage) {
+  const accountId = resolveAccountIdForChat(chatId);
+  saveAccountRisk(accountId, capital, riskPercent, maxLeverage);
   return db
     .prepare(`
       INSERT INTO user_risk_settings (
@@ -279,6 +291,8 @@ function saveRiskSettings(chatId, capital, riskPercent, maxLeverage) {
 
 
 function getRiskSettings(chatId) {
+  const accountRisk = getAccountRisk(resolveAccountIdForChat(chatId));
+  if (accountRisk) return { ...accountRisk, chat_id: String(chatId) };
   return db
     .prepare(`
       SELECT *
@@ -304,20 +318,14 @@ function normalizeTrackedSymbol(symbol) {
 
 
 function getWatchlist(chatId) {
-  return db
-    .prepare(`
-      SELECT symbol, created_at
-      FROM user_watchlist
-      WHERE chat_id = ?
-      ORDER BY created_at ASC, symbol ASC
-    `)
-    .all(String(chatId));
+  return getAccountWatchlist(resolveAccountIdForChat(chatId));
 }
 
 
 function addToWatchlist(chatId, symbol) {
   const normalized = normalizeTrackedSymbol(symbol);
   if (!normalized) throw new Error("A valid asset symbol is required.");
+  addAccountWatchlist(resolveAccountIdForChat(chatId), normalized);
   return db
     .prepare(`
       INSERT OR IGNORE INTO user_watchlist (chat_id, symbol)
@@ -330,6 +338,7 @@ function addToWatchlist(chatId, symbol) {
 function removeFromWatchlist(chatId, symbol) {
   const normalized = normalizeTrackedSymbol(symbol);
   if (!normalized) throw new Error("A valid asset symbol is required.");
+  removeAccountWatchlist(resolveAccountIdForChat(chatId), normalized);
   return db
     .prepare(`
       DELETE FROM user_watchlist
@@ -340,28 +349,20 @@ function removeFromWatchlist(chatId, symbol) {
 
 
 function getUserPreferences(chatId) {
-  return db
-    .prepare(`
-      SELECT chat_id, preferred_exchange, alert_frequency, signal_sensitivity, updated_at
-      FROM user_preferences
-      WHERE chat_id = ?
-    `)
-    .get(String(chatId)) || {
-      chat_id: String(chatId),
-      preferred_exchange: "Binance",
-      alert_frequency: "4h",
-      signal_sensitivity: "balanced",
-      updated_at: null,
-    };
+  const accountId = resolveAccountIdForChat(chatId);
+  const preferences = getAccountPreferences(accountId);
+  return { ...preferences, chat_id: String(chatId) };
 }
 
 
 function saveUserPreferences(chatId, updates = {}) {
-  const current = getUserPreferences(chatId);
+  const accountId = resolveAccountIdForChat(chatId);
+  const current = getAccountPreferences(accountId);
   const preferredExchange = String(updates.preferred_exchange || updates.preferredExchange || current.preferred_exchange || "Binance");
   const alertFrequency = String(updates.alert_frequency || updates.alertFrequency || current.alert_frequency || "4h");
   const signalSensitivity = String(updates.signal_sensitivity || updates.signalSensitivity || current.signal_sensitivity || "balanced");
 
+  saveAccountPreferences(accountId, updates);
   db.prepare(`
     INSERT INTO user_preferences (
       chat_id,

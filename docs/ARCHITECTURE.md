@@ -114,3 +114,13 @@ Entitlements should be derived from account grants, staking snapshots, promotion
 - Do not launch with a complex staking smart contract; start with a read-only entitlement adapter and configurable rules.
 - Do not expose a direct trading execution layer until account security, permissions, audit trails, and risk controls are independently verified.
 - Do not split the scanner into microservices before the account/data boundaries are stable; introduce workers only where load or failure isolation proves necessary.
+
+## 14. Phase 3 account-owned state
+
+`accountData.js` is the compatibility boundary for user-owned preferences, risk profiles, and watchlists. Existing Telegram tables remain intact and gain a nullable `account_id`; the first read/write for a Telegram chat creates or resolves its Telegram identity, backfills account-owned tables, and dual-writes the legacy row. Product reads prefer account-owned rows. This keeps existing Telegram users intact while allowing the web dashboard to update the exact state that Telegram reads.
+
+`wallets.js` owns durable wallet identities in `account_wallets`. Wallets are chain-agnostic at the model boundary (`namespace`, `chain_id`, normalized address), with EVM lowercasing and a unique chain/address constraint. A partial unique index guarantees one primary wallet per account. Wallet linking is only exposed after server-side Privy ownership verification; the browser cannot claim an arbitrary address. A wallet already attached to another account returns a conflict and is never merged.
+
+The web dashboard uses `/api/account/overview`, `/api/account/preferences`, `/api/account/risk`, and `/api/account/wallets`. All account mutations resolve the account from the verified Privy subject; no client-provided account ID authorizes a change. `PRIVY_APP_SECRET` is required for wallet ownership lookup, while `PRIVY_VERIFICATION_KEY` remains required for access-token verification.
+
+Legacy removal plan: keep dual-read/dual-write through the next migration window, backfill and audit rows, then stop writing `chat_id` after all command paths use account context. Remove legacy columns only in a separately versioned PostgreSQL migration after production verification.

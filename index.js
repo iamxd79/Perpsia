@@ -142,6 +142,9 @@ const {
   inspectTelegramLinkSession,
 } = require("./services/accountIdentity");
 const { verifyPrivyAccessToken } = require("./services/privyAuth");
+const { getPrivyUserWallets } = require("./services/privyAuth");
+const { getAccountOverview, saveAccountPreferences, saveAccountRisk } = require("./services/accountData");
+const { getUserWallets, linkWallet, unlinkWallet, setPrimaryWallet } = require("./services/wallets");
 
 
 
@@ -718,6 +721,117 @@ async function handleHttpRequest(req, res) {
         res.end(JSON.stringify({ accountId: identity.account_id, identities }));
       } catch (error) {
         const status = error.code === "PRIVY_NOT_CONFIGURED" ? 503 : 401;
+        res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/account/overview") {
+      if (req.method !== "POST") {
+        res.writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" });
+        res.end(JSON.stringify({ error: "Method not allowed" }));
+        return;
+      }
+      if (!authorizeInternalRequest(req, res)) return;
+      let body;
+      try { body = JSON.parse(await readRequestBody(req, 32 * 1024)); } catch {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: "Invalid JSON payload" }));
+        return;
+      }
+      try {
+        const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
+        const identity = getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
+        const overview = getAccountOverview(identity.account_id);
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ ...overview, wallets: getUserWallets(identity.account_id) }));
+      } catch (error) {
+        const status = error.code === "PRIVY_NOT_CONFIGURED" ? 503 : 401;
+        res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/account/wallets") {
+      if (req.method !== "POST") {
+        res.writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" });
+        res.end(JSON.stringify({ error: "Method not allowed" }));
+        return;
+      }
+      if (!authorizeInternalRequest(req, res)) return;
+      let body;
+      try { body = JSON.parse(await readRequestBody(req, 32 * 1024)); } catch {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: "Invalid JSON payload" }));
+        return;
+      }
+      try {
+        const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
+        const identity = getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
+        let result;
+        if (body?.action === "link") {
+          const requested = body.wallet && typeof body.wallet === "object" ? body.wallet : {};
+          const owned = await getPrivyUserWallets(verified.user_id);
+          const target = owned.find((wallet) => String(wallet.address).toLowerCase() === String(requested.address || "").trim().toLowerCase());
+          if (!target) {
+            const error = new Error("That wallet is not linked to the authenticated Privy user.");
+            error.code = "WALLET_NOT_OWNED";
+            throw error;
+          }
+          result = linkWallet(identity.account_id, {
+            ...requested,
+            ...target,
+            chain: requested.chain || { namespace: target.chainType === "solana" ? "solana" : "eip155", id: requested.chain?.id || "1" },
+          });
+        } else if (body?.action === "set_primary") {
+          result = setPrimaryWallet(identity.account_id, body.walletId);
+        } else if (body?.action === "unlink") {
+          result = unlinkWallet(identity.account_id, body.walletId);
+        } else {
+          result = getUserWallets(identity.account_id);
+        }
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ wallets: Array.isArray(result) ? result : getUserWallets(identity.account_id), result: Array.isArray(result) ? undefined : result }));
+      } catch (error) {
+        const conflict = error.code === "WALLET_ACCOUNT_CONFLICT";
+        const ownership = error.code === "WALLET_NOT_OWNED";
+        const notConfigured = ["PRIVY_NOT_CONFIGURED", "PRIVY_SERVER_NOT_CONFIGURED"].includes(error.code);
+        const status = notConfigured ? 503 : conflict ? 409 : ownership ? 403 : error.code === "INVALID_PRIVY_TOKEN" ? 401 : 400;
+        res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: conflict ? "wallet_account_conflict" : ownership ? "wallet_not_owned" : error.message }));
+      }
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/account/preferences" || requestUrl.pathname === "/api/account/risk") {
+      if (req.method !== "POST") {
+        res.writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" });
+        res.end(JSON.stringify({ error: "Method not allowed" }));
+        return;
+      }
+      if (!authorizeInternalRequest(req, res)) return;
+      let body;
+      try { body = JSON.parse(await readRequestBody(req, 32 * 1024)); } catch {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: "Invalid JSON payload" }));
+        return;
+      }
+      try {
+        const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
+        const identity = getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
+        if (requestUrl.pathname.endsWith("/preferences")) {
+          saveAccountPreferences(identity.account_id, body.preferences || {});
+        } else {
+          const values = [body.risk?.capital, body.risk?.riskPercent ?? body.risk?.risk_percent, body.risk?.maxLeverage ?? body.risk?.max_leverage].map(Number);
+          if (values.some((value) => !Number.isFinite(value) || value <= 0)) throw new Error("Valid capital, risk percentage, and leverage are required.");
+          saveAccountRisk(identity.account_id, ...values);
+        }
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify(getAccountOverview(identity.account_id)));
+      } catch (error) {
+        const status = error.code === "PRIVY_NOT_CONFIGURED" ? 503 : error.code === "INVALID_PRIVY_TOKEN" ? 401 : 400;
         res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
         res.end(JSON.stringify({ error: error.message }));
       }
