@@ -35,6 +35,16 @@ node scripts/db-migrate.js
 
 The runner creates `schema_migrations`, applies files in lexical version order, and wraps each file in a transaction. It is safe to rerun.
 
+The current Phase 6 dry-run includes `004_token_asset_status.sql`, which makes the asset contract nullable for mock/planned assets and adds explicit asset status/network metadata.
+
+After applying migrations to staging, validate the actual PostgreSQL catalog and row counts with:
+
+```bash
+npm run db:staging:validate
+```
+
+The validator is intentionally fail-closed when no PostgreSQL URL is configured. It checks expected tables, indexes, foreign keys, and core account-owned row counts without exposing connection details.
+
 ## SQLite migration
 
 The migration tool is dry-run by default and reports orphaned/ambiguous records. It never deletes or mutates SQLite:
@@ -60,3 +70,5 @@ The current tool migrates accounts, identities, wallets, preferences, risk profi
 5. Enable PostgreSQL for staging only and observe reconnect/error metrics.
 6. Repeat the snapshot/report/reconciliation process for production.
 7. Keep SQLite read-only rollback material until the PostgreSQL cutover is stable.
+
+The backend is not yet PostgreSQL-canonical. Telegram handlers, paper trading, account preferences, alerts, entitlements, and several operational services still open SQLite directly. The cutover must replace these repositories together; setting an environment flag alone would create split-brain state.

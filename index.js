@@ -150,6 +150,7 @@ const { getAccountBalance } = require("./services/tokenBalance");
 const { getAsset } = require("./services/assetRegistry");
 const { getStakingState } = require("./services/staking");
 const { getAccountEntitlements } = require("./services/entitlements");
+const { getTokenHealth } = require("./services/tokenHealth");
 
 
 
@@ -615,6 +616,7 @@ async function handleHttpRequest(req, res) {
           walletRegistry: getRegistryHealth(),
           alchemySync: getAlchemySyncHealth(),
           walletRefresh: getWalletRefreshHealth(),
+          token: getTokenHealth(),
         },
         providers,
         realtime: {
