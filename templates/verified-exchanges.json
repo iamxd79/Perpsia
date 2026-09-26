@@ -1,4 +1,77 @@
 {
   "_instructions": "Add only publicly documented exchange addresses. Every wallet needs address, chain, exchange, role, verificationStatus, and a valid official or trusted sourceUrl.",
-  "wallets": []
+  "wallets": [
+    {
+      "exchange": "Binance",
+      "chain": "ethereum",
+      "role": "hot",
+      "address": "0xf977814e90da44bfa03b6295a0616a897441acec",
+      "source": "official+verified-explorer",
+      "sourceUrl": "https://www.binance.com/en/proof-of-reserves",
+      "verificationStatus": "verified",
+      "sourceConfidence": 0.98,
+      "label": "Binance Hot Wallet 20",
+      "notes": "Published in Binance Proof of Reserves materials and labeled on Etherscan; reserve snapshot evidence is point-in-time."
+    },
+    {
+      "exchange": "Upbit",
+      "chain": "ethereum",
+      "role": "hot",
+      "address": "0xf824dca44691bc2af8829051f4c5e6a2566060f3",
+      "source": "verified-explorer",
+      "sourceUrl": "https://etherscan.io/address/0xf824dca44691bc2af8829051f4c5e6a2566060f3",
+      "verificationStatus": "verified",
+      "sourceConfidence": 0.9,
+      "label": "Upbit Hot Wallet",
+      "notes": "Etherscan public exchange label; confirm current operational role before expanding monitoring."
+    },
+    {
+      "exchange": "Bitget",
+      "chain": "ethereum",
+      "role": "hot",
+      "address": "0xf646d9b7d20babe204a89235774248ba18086dae",
+      "source": "verified-explorer-compilation",
+      "sourceUrl": "https://etherscan.io/address/0xf646d9b7d20babe204a89235774248ba18086dae",
+      "verificationStatus": "pending",
+      "sourceConfidence": 0.72,
+      "label": "Bitget Hot Wallet 3",
+      "notes": "Etherscan label notes it is based on a public compilation; kept pending and disabled until corroborated by Bitget or a second authoritative source."
+    },
+    {
+      "exchange": "Bithumb",
+      "chain": "ethereum",
+      "role": "hot",
+      "address": "0x17e5545b11b468072283cee1f066a059fb0dbf24",
+      "source": "verified-explorer",
+      "sourceUrl": "https://etherscan.io/address/0x17e5545b11b468072283cee1f066a059fb0dbf24",
+      "verificationStatus": "verified",
+      "sourceConfidence": 0.9,
+      "label": "Bithumb Hot Wallet",
+      "notes": "Etherscan public exchange label; confirm current operational role before expanding monitoring."
+    },
+    {
+      "exchange": "OKX",
+      "chain": "ethereum",
+      "role": "aggregation",
+      "address": "0x96fdc631f02207b72e5804428dee274cf2ac0bcd",
+      "source": "official+verified-explorer",
+      "sourceUrl": "https://www.okx.com/en-us/proof-of-reserves",
+      "verificationStatus": "verified",
+      "sourceConfidence": 0.95,
+      "label": "OKX Wallet",
+      "notes": "OKX publishes reserve wallet addresses and ownership verification guidance; Etherscan labels this address as OKX."
+    },
+    {
+      "exchange": "Bybit",
+      "chain": "ethereum",
+      "role": "hot",
+      "address": "0xf89d7b9c864f589bbf53a82105107622b35eaa40",
+      "source": "verified-explorer",
+      "sourceUrl": "https://etherscan.io/address/0xf89d7b9c864f589bbf53a82105107622b35eaa40",
+      "verificationStatus": "verified",
+      "sourceConfidence": 0.9,
+      "label": "Bybit Hot Wallet",
+      "notes": "Etherscan public exchange label; confirm current operational role before expanding monitoring."
+    }
+  ]
 }

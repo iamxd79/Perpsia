@@ -5,7 +5,7 @@ const Database = require("better-sqlite3");
 
 const registry = require("../services/walletRegistry");
 const { analyzeWalletActivity, buildWalletEvidence } = require("../services/walletIntelligence");
-const { syncAlchemyWatchlist } = require("../services/alchemySync");
+const { listRemoteWebhooks, syncAlchemyWatchlist } = require("../services/alchemySync");
 const { evidenceDirection } = require("../services/signalQuality");
 
 test("canonical wallet registry deduplicates wallets and rejects unverified exchange labels", () => {
@@ -129,6 +129,7 @@ test("Alchemy watchlist sync updates only matching PerpsIA Address Activity webh
     assert.equal(result.status, "synced", JSON.stringify(result));
     assert.equal(result.syncedWalletCount, 5);
     assert.ok(calls.some((config) => config.url.endsWith("/update-webhook-addresses")));
+    assert.equal(calls.find((config) => config.url.endsWith("/webhook-addresses")).params.limit, 100);
     assert.equal(registry.listAlchemySync({ chain: "ethereum" }).some((row) => row.alchemySubscribed), true);
   } finally {
     axios.request = previousRequest;
@@ -136,5 +137,31 @@ test("Alchemy watchlist sync updates only matching PerpsIA Address Activity webh
       if (value === undefined) delete process.env[name === "enabled" ? "ALCHEMY_ENABLED" : name === "token" ? "ALCHEMY_NOTIFY_AUTH_TOKEN" : "ALCHEMY_WEBHOOK_URL"];
       else process.env[name === "enabled" ? "ALCHEMY_ENABLED" : name === "token" ? "ALCHEMY_NOTIFY_AUTH_TOKEN" : "ALCHEMY_WEBHOOK_URL"] = value;
     }
+  }
+});
+
+test("Alchemy Notify diagnostics preserve the endpoint and redact secret-like response fields", async () => {
+  const previousRequest = axios.request;
+  const previousError = console.error;
+  const logs = [];
+  axios.request = async () => ({
+    status: 400,
+    data: { message: "invalid auth token", token: "must-not-appear" },
+  });
+  console.error = (line) => logs.push(String(line));
+  try {
+    await assert.rejects(
+      () => listRemoteWebhooks({ authToken: "test-notify-token" }),
+      (error) => error.status === 400 && error.endpoint === "/team-webhooks" && error.responseBody.message === "invalid auth token",
+    );
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /alchemy_notify_request_failed/);
+    assert.match(logs[0], /team-webhooks/);
+    assert.match(logs[0], /400/);
+    assert.match(logs[0], /invalid auth token/);
+    assert.doesNotMatch(logs[0], /must-not-appear|test-notify-token/);
+  } finally {
+    axios.request = previousRequest;
+    console.error = previousError;
   }
 });

@@ -3,6 +3,8 @@
 // Local/server-side wallet registry administration only.
 // This file is intentionally a CLI entrypoint; it is not imported by the HTTP server.
 
+require("dotenv").config();
+
 const fs = require("fs");
 const path = require("path");
 const admin = require("../services/walletAdmin");
@@ -212,11 +214,13 @@ function run(command, values) {
   }
 }
 
-try {
+async function main() {
   const { command, values } = parseArgs(process.argv.slice(2));
-  const result = run(command, values);
+  const result = await run(command, values);
   if (result !== undefined) process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-} catch (error) {
+}
+
+main().catch((error) => {
   process.stderr.write(`wallet-admin: ${error.message}\n`);
   process.exitCode = 1;
-}
+});
