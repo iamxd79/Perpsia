@@ -381,7 +381,12 @@ function getBuildHealth() {
         2,
         Math.max(0, Number.isFinite(configuredDeepAnalysis) ? configuredDeepAnalysis : 2)
       ),
-      aiValidationCandidates: Number(process.env.PERPSIA_AI_VALIDATION_CANDIDATES || 12),
+      aiValidationCandidates: Math.min(
+        2,
+        Math.max(0, Number.isFinite(Number(process.env.PERPSIA_AI_VALIDATION_CANDIDATES || 2))
+          ? Number(process.env.PERPSIA_AI_VALIDATION_CANDIDATES || 2)
+          : 2)
+      ),
     },
   };
 }

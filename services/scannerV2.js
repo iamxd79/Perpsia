@@ -3880,8 +3880,12 @@ async function runMarketScan(venue = "Binance", onProgress = async () => {}, opt
     2,
     Math.max(0, Number.isFinite(configuredDeepAnalysisLimit) ? configuredDeepAnalysisLimit : 2)
   );
-  const configuredAiValidationLimit = Number(process.env.PERPSIA_AI_VALIDATION_CANDIDATES || 12);
-  const aiValidationLimit = Math.min(symbols.length, Math.max(0, Number.isFinite(configuredAiValidationLimit) ? configuredAiValidationLimit : 12));
+  const configuredAiValidationLimit = Number(process.env.PERPSIA_AI_VALIDATION_CANDIDATES || 2);
+  const aiValidationLimit = Math.min(
+    symbols.length,
+    2,
+    Math.max(0, Number.isFinite(configuredAiValidationLimit) ? configuredAiValidationLimit : 2)
+  );
   let aiValidationCount = 0;
 
 
