@@ -50,7 +50,7 @@ async function createCmcClient() {
   try {
     await withTimeout(
       client.connect(transport),
-      boundedTimeout(process.env.CMC_CONNECT_TIMEOUT_MS, 30000),
+      boundedTimeout(process.env.CMC_CONNECT_TIMEOUT_MS, 10000),
       "CMC MCP connection"
     );
     return client;
@@ -62,7 +62,7 @@ async function createCmcClient() {
 
 function boundedTimeout(value, fallback) {
   const parsed = Number(value);
-  return Math.min(Math.max(Number.isFinite(parsed) ? parsed : fallback, 10000), 60000);
+  return Math.min(Math.max(Number.isFinite(parsed) ? parsed : fallback, 5000), 20000);
 }
 
 async function withTimeout(promise, timeoutMs, label) {
@@ -161,7 +161,7 @@ async function findSkill(query, topK = 5) {
   try {
     const result = await executeWithResilience(
       () => {
-        const timeout = boundedTimeout(process.env.CMC_FIND_SKILL_TIMEOUT_MS, 30000);
+        const timeout = boundedTimeout(process.env.CMC_FIND_SKILL_TIMEOUT_MS, 10000);
         return callToolWithTimeout(
           "find_skill",
           {
@@ -201,7 +201,7 @@ async function executeSkill(uniqueName, parameters = {}) {
   try {
     const result = await executeWithResilience(
       () => {
-        const timeout = boundedTimeout(process.env.CMC_SKILL_TIMEOUT_MS, 30000);
+        const timeout = boundedTimeout(process.env.CMC_SKILL_TIMEOUT_MS, 10000);
         return callToolWithTimeout(
           "execute_skill",
           {
