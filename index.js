@@ -371,12 +371,16 @@ function getPublicScanCandidates() {
     });
 }
 function getBuildHealth() {
+  const configuredDeepAnalysis = Number(process.env.PERPSIA_DEEP_ANALYSIS_CANDIDATES || 2);
   return {
     commit: process.env.RENDER_GIT_COMMIT || process.env.RENDER_GIT_COMMIT_SHA || null,
     node: process.version,
     scanLimits: {
       maxCandidates: Number(process.env.PERPSIA_MAX_SCAN_CANDIDATES || 54),
-      deepAnalysisCandidates: Number(process.env.PERPSIA_DEEP_ANALYSIS_CANDIDATES || 4),
+      deepAnalysisCandidates: Math.min(
+        2,
+        Math.max(0, Number.isFinite(configuredDeepAnalysis) ? configuredDeepAnalysis : 2)
+      ),
       aiValidationCandidates: Number(process.env.PERPSIA_AI_VALIDATION_CANDIDATES || 12),
     },
   };
