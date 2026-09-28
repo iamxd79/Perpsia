@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { classifyCandidate, extractSymbolsFromScan } = require("../services/scannerV2");
+const { classifyCandidate, extractSymbolsFromScan, parseToolResult } = require("../services/scannerV2");
 
 test("extracts candidates from the live ranked-primary CMC report heading", () => {
   const payload = {
@@ -48,6 +48,13 @@ test("extracts symbols from the live ranked candidate table", () => {
     },
   };
   assert.deepEqual(extractSymbolsFromScan(payload), ["AERO", "USDC", "CASHCAT"]);
+});
+
+test("rejects oversized CMC payloads before recursive expansion", () => {
+  assert.throws(
+    () => parseToolResult({ structuredContent: { output: "x".repeat(2_100_000) } }),
+    /payload exceeded/i
+  );
 });
 
 test("preserves normalized provider records returned in an evidence envelope", () => {

@@ -5086,6 +5086,7 @@ module.exports = {
   parseLiquidationFlow,
   normalizeSymbol,
   executeSkillWithFallback,
+  parseToolResult,
   getCachedResult,
   extractSymbolsFromScan,
   ResultCache: resultCache,
