@@ -38,7 +38,12 @@ function trackUser(msg, eventType = "message", metadata = {}) {
       firstName: user.first_name || null,
     });
     if (identity && typeof identity.then === "function") {
-      return identity.then((resolved) => recordTrackedUser(chatId, user, eventType, metadata, resolved.account_id));
+      return identity
+        .then((resolved) => recordTrackedUser(chatId, user, eventType, metadata, resolved.account_id))
+        .catch((error) => {
+          console.error("Account identity sync failed:", error?.message || error);
+          return recordTrackedUser(chatId, user, eventType, metadata, null);
+        });
     }
     accountId = identity.account_id;
   } catch (error) {

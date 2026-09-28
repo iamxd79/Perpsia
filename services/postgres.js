@@ -13,7 +13,17 @@ function isConfigured() { return Boolean(getPostgresUrl()); }
 function getPool() {
   const connectionString = getPostgresUrl();
   if (!connectionString) throw new Error("PostgreSQL is not configured.");
-  if (!pool) pool = new Pool({ connectionString, ssl: process.env.PERPSIA_DATABASE_SSL === "false" ? false : { rejectUnauthorized: false }, max: Number(process.env.PERPSIA_DATABASE_POOL_SIZE || 5), connectionTimeoutMillis: 8000 });
+  if (!pool) {
+    const configuredIpFamily = Number(process.env.PERPSIA_DATABASE_IP_FAMILY || 4);
+    const ipFamily = configuredIpFamily === 6 ? 6 : 4;
+    pool = new Pool({
+      connectionString,
+      ssl: process.env.PERPSIA_DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
+      max: Number(process.env.PERPSIA_DATABASE_POOL_SIZE || 5),
+      connectionTimeoutMillis: 8000,
+      family: ipFamily,
+    });
+  }
   return pool;
 }
 

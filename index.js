@@ -5007,7 +5007,11 @@ bot.onText(/^\/about(?:@\w+)?$/i, async (msg) => {
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text?.trim();
-  await Promise.resolve(trackUser(msg, text?.startsWith("/start") ? "start" : "message"));
+  try {
+    await Promise.resolve(trackUser(msg, text?.startsWith("/start") ? "start" : "message"));
+  } catch (error) {
+    console.error("Account identity sync failed:", error?.message || error);
+  }
 
 
 
