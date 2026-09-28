@@ -62,7 +62,7 @@ async function createCmcClient() {
 
 function boundedTimeout(value, fallback) {
   const parsed = Number(value);
-  return Math.min(Math.max(Number.isFinite(parsed) ? parsed : fallback, 10000), 300000);
+  return Math.min(Math.max(Number.isFinite(parsed) ? parsed : fallback, 10000), 60000);
 }
 
 async function withTimeout(promise, timeoutMs, label) {
@@ -81,8 +81,8 @@ async function withTimeout(promise, timeoutMs, label) {
   }
 }
 function cmcRetries() {
-  const parsed = Number(process.env.CMC_REQUEST_RETRIES ?? 1);
-  return Math.min(Math.max(Number.isFinite(parsed) ? parsed : 1, 0), 2);
+  const parsed = Number(process.env.CMC_REQUEST_RETRIES ?? 0);
+  return Math.min(Math.max(Number.isFinite(parsed) ? parsed : 0, 0), 2);
 }
 function providerError(result) {
   const textBlock = result?.content?.find((item) => item.type === "text");
@@ -141,7 +141,7 @@ async function findSkill(query, topK = 5) {
           query,
           top_k: topK,
         },
-        boundedTimeout(process.env.CMC_FIND_SKILL_TIMEOUT_MS, 60000)
+        boundedTimeout(process.env.CMC_FIND_SKILL_TIMEOUT_MS, 30000)
       ),
       {
         retries: cmcRetries(),
@@ -177,7 +177,7 @@ async function executeSkill(uniqueName, parameters = {}) {
           unique_name: skill,
           parameters,
         },
-        boundedTimeout(process.env.CMC_SKILL_TIMEOUT_MS, 60000)
+        boundedTimeout(process.env.CMC_SKILL_TIMEOUT_MS, 30000)
       ),
       {
         retries: cmcRetries(),
