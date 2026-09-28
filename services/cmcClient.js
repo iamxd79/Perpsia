@@ -94,7 +94,7 @@ function providerError(result) {
   return error;
 }
 
-async function callToolOnce(toolName, argumentsObject, timeout) {
+async function callToolOnce(toolName, argumentsObject, timeout, signal) {
   const client = await createCmcClient();
 
   try {
@@ -106,6 +106,8 @@ async function callToolOnce(toolName, argumentsObject, timeout) {
       undefined,
       {
         timeout,
+        maxTotalTimeout: timeout,
+        signal,
       }
     );
 
@@ -116,6 +118,29 @@ async function callToolOnce(toolName, argumentsObject, timeout) {
     return result;
   } finally {
     await client.close();
+  }
+}
+
+async function callToolWithTimeout(toolName, argumentsObject, timeout, label) {
+  const controller = new AbortController();
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      const error = new Error(label + " timed out after " + timeout + "ms");
+      error.code = "ETIMEDOUT";
+      reject(error);
+    }, timeout);
+  });
+
+  try {
+    return await Promise.race([
+      callToolOnce(toolName, argumentsObject, timeout, controller.signal),
+      timeoutPromise,
+    ]);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
   }
 }
 
@@ -137,15 +162,12 @@ async function findSkill(query, topK = 5) {
     const result = await executeWithResilience(
       () => {
         const timeout = boundedTimeout(process.env.CMC_FIND_SKILL_TIMEOUT_MS, 30000);
-        return withTimeout(
-          callToolOnce(
-            "find_skill",
-            {
-              query,
-              top_k: topK,
-            },
-            timeout
-          ),
+        return callToolWithTimeout(
+          "find_skill",
+          {
+            query,
+            top_k: topK,
+          },
           timeout,
           "CMC find_skill"
         );
@@ -180,15 +202,12 @@ async function executeSkill(uniqueName, parameters = {}) {
     const result = await executeWithResilience(
       () => {
         const timeout = boundedTimeout(process.env.CMC_SKILL_TIMEOUT_MS, 30000);
-        return withTimeout(
-          callToolOnce(
-            "execute_skill",
-            {
-              unique_name: skill,
-              parameters,
-            },
-            timeout
-          ),
+        return callToolWithTimeout(
+          "execute_skill",
+          {
+            unique_name: skill,
+            parameters,
+          },
           timeout,
           `CMC ${skill}`
         );
