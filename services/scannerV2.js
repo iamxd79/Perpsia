@@ -102,7 +102,11 @@ function scanDeadlineReached(deadlineAt, reserveMs = 0) {
 
 // Simple in-memory cache for fallback
 const resultCache = new Map();
-const MAX_RESULT_CACHE_ENTRIES = 200;
+const MAX_RESULT_CACHE_ENTRIES = 64;
+const MAX_CMC_RESULT_BYTES = Math.min(
+  4_000_000,
+  Math.max(256_000, Number(process.env.PERPSIA_MAX_CMC_RESULT_BYTES || 2_000_000))
+);
 
 
 
@@ -201,6 +205,12 @@ function formatProviderError(error) {
 function parseToolResult(result) {
   const textBlock = result?.content?.find((item) => item.type === "text");
 
+  if (textBlock?.text && Buffer.byteLength(textBlock.text, "utf8") > MAX_CMC_RESULT_BYTES) {
+    throw new Error(
+      `CMC Skill Hub payload exceeded ${MAX_CMC_RESULT_BYTES} bytes`
+    );
+  }
+
 
 
 
@@ -223,6 +233,20 @@ function parseToolResult(result) {
 
 
   let parsed = result?.structuredContent;
+
+  if (parsed !== undefined) {
+    let serializedBytes;
+    try {
+      serializedBytes = Buffer.byteLength(JSON.stringify(parsed), "utf8");
+    } catch {
+      throw new Error("CMC Skill Hub payload could not be bounded safely");
+    }
+    if (serializedBytes > MAX_CMC_RESULT_BYTES) {
+      throw new Error(
+        `CMC Skill Hub payload exceeded ${MAX_CMC_RESULT_BYTES} bytes`
+      );
+    }
+  }
 
 
 
