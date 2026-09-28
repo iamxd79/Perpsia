@@ -135,14 +135,21 @@ async function findSkill(query, topK = 5) {
 
   try {
     const result = await executeWithResilience(
-      () => callToolOnce(
-        "find_skill",
-        {
-          query,
-          top_k: topK,
-        },
-        boundedTimeout(process.env.CMC_FIND_SKILL_TIMEOUT_MS, 30000)
-      ),
+      () => {
+        const timeout = boundedTimeout(process.env.CMC_FIND_SKILL_TIMEOUT_MS, 30000);
+        return withTimeout(
+          callToolOnce(
+            "find_skill",
+            {
+              query,
+              top_k: topK,
+            },
+            timeout
+          ),
+          timeout,
+          "CMC find_skill"
+        );
+      },
       {
         retries: cmcRetries(),
         onRetry: (detail) => retryLogger(skill, detail),
@@ -171,14 +178,21 @@ async function executeSkill(uniqueName, parameters = {}) {
 
   try {
     const result = await executeWithResilience(
-      () => callToolOnce(
-        "execute_skill",
-        {
-          unique_name: skill,
-          parameters,
-        },
-        boundedTimeout(process.env.CMC_SKILL_TIMEOUT_MS, 30000)
-      ),
+      () => {
+        const timeout = boundedTimeout(process.env.CMC_SKILL_TIMEOUT_MS, 30000);
+        return withTimeout(
+          callToolOnce(
+            "execute_skill",
+            {
+              unique_name: skill,
+              parameters,
+            },
+            timeout
+          ),
+          timeout,
+          `CMC ${skill}`
+        );
+      },
       {
         retries: cmcRetries(),
         onRetry: (detail) => retryLogger(skill, detail),
