@@ -144,7 +144,7 @@ function validateOrder(order) {
 
 async function openPosition(chatId, order, fetchImpl) {
   validateOrder(order);
-  const accountId = resolveAccountIdForChat(chatId);
+  const accountId = await resolveAccountIdForChat(chatId);
   db.prepare("UPDATE paper_positions SET account_id = ? WHERE chat_id = ? AND (account_id IS NULL OR account_id = '')").run(accountId, String(chatId));
   const existing = db.prepare("SELECT id FROM paper_positions WHERE account_id = ? AND symbol = ? AND status = 'OPEN'").get(accountId, order.symbol);
   if (existing) throw new Error(`You already have an open paper position on ${displaySymbol(order.symbol)}. Close it first.`);
@@ -165,6 +165,11 @@ function getPosition(id) {
 
 function getOpenPositions(chatId) {
   const accountId = resolveAccountIdForChat(chatId);
+  if (accountId && typeof accountId.then === "function") return accountId.then((resolved) => getOpenPositionsForAccount(chatId, resolved));
+  return getOpenPositionsForAccount(chatId, accountId);
+}
+
+function getOpenPositionsForAccount(chatId, accountId) {
   db.prepare("UPDATE paper_positions SET account_id = ? WHERE chat_id = ? AND (account_id IS NULL OR account_id = '')").run(accountId, String(chatId));
   return db.prepare("SELECT * FROM paper_positions WHERE account_id = ? AND status = 'OPEN' ORDER BY id DESC").all(accountId);
 }
@@ -182,7 +187,7 @@ function closePosition(id, exitPrice, reason = "MANUAL") {
 async function refreshPositions(chatId = null, { fetchImpl = globalThis.fetch } = {}) {
   const positions = chatId === null
     ? db.prepare("SELECT * FROM paper_positions WHERE status = 'OPEN'").all()
-    : getOpenPositions(chatId);
+    : await getOpenPositions(chatId);
   const updated = [];
   const closed = [];
   for (const position of positions) {
@@ -219,8 +224,8 @@ function formatClosed(position) {
 }
 
 async function getStats(chatId, { fetchImpl = globalThis.fetch } = {}) {
-  const accountId = resolveAccountIdForChat(chatId);
-  const open = getOpenPositions(chatId);
+  const accountId = await resolveAccountIdForChat(chatId);
+  const open = await getOpenPositions(chatId);
   const refreshed = await refreshPositions(chatId, { fetchImpl });
   const closed = db.prepare("SELECT * FROM paper_positions WHERE account_id = ? AND status = 'CLOSED' ORDER BY id DESC LIMIT 100").all(accountId);
   const realized = closed.reduce((sum, row) => sum + Number(row.realized_pnl || 0), 0);

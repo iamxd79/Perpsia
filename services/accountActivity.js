@@ -30,6 +30,13 @@ db.exec(`
 
 function recordAccountAnalysis(chatId, analysis = {}) {
   const accountId = resolveAccountIdForChat(chatId);
+  if (accountId && typeof accountId.then === "function") {
+    return accountId.then((resolvedAccountId) => require("./postgresAccountRepository").recordAnalysis(resolvedAccountId, analysis));
+  }
+  return recordAccountAnalysisForAccount(accountId, analysis);
+}
+
+function recordAccountAnalysisForAccount(accountId, analysis = {}) {
   const result = db.prepare(`INSERT INTO account_analysis_history (account_id, symbol, venue, analysis_type, request_source, result_reference, signal_reference, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(accountId, String(analysis.symbol || "").toUpperCase(), analysis.venue || null, String(analysis.analysisType || "asset_analysis"), String(analysis.requestSource || "telegram"), analysis.resultReference || null, analysis.signalReference || null, JSON.stringify(analysis.metadata || {}));
   db.prepare("INSERT INTO account_usage_events (account_id, event_type, metadata_json) VALUES (?, ?, ?)").run(accountId, "analysis", JSON.stringify({ symbol: analysis.symbol, source: analysis.requestSource || "telegram" }));

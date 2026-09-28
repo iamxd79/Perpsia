@@ -1,7 +1,7 @@
 "use strict";
 
 const { openDatabase } = require("./database");
-const { getIdentity, getOrCreateTelegramAccount } = require("./accountIdentity");
+const { getIdentity, getOrCreateTelegramAccount, isPostgresIdentityEnabled } = require("./accountIdentity");
 
 const db = openDatabase();
 
@@ -57,6 +57,9 @@ for (const table of ["user_preferences", "user_risk_settings", "user_watchlist"]
 
 function ensureAccountForChat(chatId) {
   const identity = getOrCreateTelegramAccount(String(chatId));
+  if (identity && typeof identity.then === "function") {
+    return identity.then((resolved) => resolved.account_id);
+  }
   const accountId = identity.account_id;
   for (const table of ["user_preferences", "user_risk_settings", "user_watchlist"]) {
     db.prepare(`UPDATE ${table} SET account_id = ? WHERE chat_id = ? AND (account_id IS NULL OR account_id = '')`).run(accountId, String(chatId));
@@ -114,13 +117,27 @@ function removeAccountWatchlist(accountId, symbol) {
 
 function getAccountOverview(accountId) {
   const id = String(accountId);
+  if (isPostgresIdentityEnabled()) {
+    return require("./postgresAccountRepository").getAccountOverview(id);
+  }
   const account = db.prepare("SELECT account_id, status, created_at, updated_at FROM perpsia_accounts WHERE account_id = ?").get(id);
   if (!account) return null;
-  const identities = require("./accountIdentity").getAccountIdentities(id).map((item) => ({ provider: item.provider, createdAt: item.created_at, lastSeenAt: item.last_seen_at }));
+  const identitiesResult = require("./accountIdentity").getAccountIdentities(id);
   const analyses = require("./accountActivity").getAccountAnalyses(id);
+  if (identitiesResult && typeof identitiesResult.then === "function") {
+    return identitiesResult.then((items) => ({
+      account,
+      identities: items.map((item) => ({ provider: item.provider, createdAt: item.created_at, lastSeenAt: item.last_seen_at })),
+      preferences: getAccountPreferences(id),
+      risk: getAccountRisk(id),
+      watchlist: getAccountWatchlist(id),
+      analyses,
+    }));
+  }
+  const identities = identitiesResult.map((item) => ({ provider: item.provider, createdAt: item.created_at, lastSeenAt: item.last_seen_at }));
   return { account, identities, preferences: getAccountPreferences(id), risk: getAccountRisk(id), watchlist: getAccountWatchlist(id), analyses };
 }
 
 function getAccountIdForPrivy(subject) { return getIdentity("privy", subject)?.account_id || null; }
 
-module.exports = { resolveAccountIdForChat, getAccountPreferences, saveAccountPreferences, getAccountRisk, saveAccountRisk, getAccountWatchlist, addAccountWatchlist, removeAccountWatchlist, getAccountOverview, getAccountIdForPrivy };
+module.exports = { resolveAccountIdForChat, getAccountPreferences, saveAccountPreferences, getAccountRisk, saveAccountRisk, getAccountWatchlist, addAccountWatchlist, removeAccountWatchlist, getAccountOverview, getAccountIdForPrivy, isPostgresIdentityEnabled };

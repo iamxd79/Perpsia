@@ -10,7 +10,9 @@ process.env.PERPSIA_DB_PATH = path.join(
 
 const {
   consumeTelegramLinkSession,
+  consumeWebTelegramLinkSession,
   createTelegramLinkSession,
+  createWebTelegramLinkSession,
   getAccountIdentities,
   getIdentity,
   getOrCreateIdentity,
@@ -32,7 +34,7 @@ test("keeps Telegram identity stable and creates a one-time web link", () => {
   const linked = consumeTelegramLinkSession(session.token, "privy", "did:privy:alice");
   assert.equal(linked.account_id, first.account_id);
   assert.equal(getAccountIdentities(first.account_id).map((item) => item.provider).sort().join(","), "privy,telegram");
-  assert.throws(() => consumeTelegramLinkSession(session.token, "privy", "did:privy:alice"), /expired or was already used/);
+  assert.throws(() => consumeTelegramLinkSession(session.token, "privy", "did:privy:alice"), (error) => error.code === "LINK_USED");
 });
 
 test("rejects malformed, expired, and conflicting links without consuming them", async () => {
@@ -41,7 +43,7 @@ test("rejects malformed, expired, and conflicting links without consuming them",
   const expired = createTelegramLinkSession("telegram-expiring", { ttlMs: 1 });
   await new Promise((resolve) => setTimeout(resolve, 1100));
   assert.equal(inspectTelegramLinkSession(expired.token).status, "expired");
-  assert.throws(() => consumeTelegramLinkSession(expired.token, "privy", "did:privy:expired"), /expired or was already used/);
+  assert.throws(() => consumeTelegramLinkSession(expired.token, "privy", "did:privy:expired"), (error) => error.code === "LINK_EXPIRED");
 
   const existing = getOrCreateTelegramAccount("telegram-conflict");
   getOrCreateIdentity("privy", "did:privy:other-account");
@@ -53,4 +55,32 @@ test("rejects malformed, expired, and conflicting links without consuming them",
   assert.equal(inspectTelegramLinkSession(conflict.token).status, "valid");
   const linked = consumeTelegramLinkSession(conflict.token, "privy", "did:privy:new-account");
   assert.equal(linked.account_id, existing.account_id);
+});
+
+test("supports web-first account creation and reverse Telegram linking", () => {
+  const webIdentity = getOrCreateIdentity("privy", "did:privy:web-first");
+  const session = createWebTelegramLinkSession(webIdentity.account_id, {
+    appUrl: "https://example.test",
+    botUsername: "perpsia_bot",
+  });
+  assert.match(session.telegramUrl, /^https:\/\/t\.me\/perpsia_bot\?start=link_/);
+  assert.equal(inspectTelegramLinkSession(session.token).status, "valid");
+
+  const telegram = consumeWebTelegramLinkSession(session.token, "telegram-web-first", { username: "webfirst" });
+  assert.equal(telegram.account_id, webIdentity.account_id);
+  assert.deepEqual(getAccountIdentities(webIdentity.account_id).map((item) => item.provider).sort(), ["privy", "telegram"]);
+  assert.throws(() => consumeWebTelegramLinkSession(session.token, "telegram-web-first"), (error) => error.code === "LINK_USED");
+});
+
+test("rejects conflicting reverse links and keeps the token usable", () => {
+  const target = getOrCreateIdentity("privy", "did:privy:reverse-target");
+  const existingTelegram = getOrCreateTelegramAccount("telegram-already-owned");
+  assert.notEqual(target.account_id, existingTelegram.account_id);
+  const session = createWebTelegramLinkSession(target.account_id);
+
+  assert.throws(
+    () => consumeWebTelegramLinkSession(session.token, "telegram-already-owned"),
+    (error) => error.code === "IDENTITY_CONFLICT",
+  );
+  assert.equal(inspectTelegramLinkSession(session.token).status, "valid");
 });

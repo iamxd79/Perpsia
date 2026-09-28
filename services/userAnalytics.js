@@ -33,13 +33,21 @@ function trackUser(msg, eventType = "message", metadata = {}) {
   const user = msg?.from || msg?.chat?.user || {};
   let accountId = null;
   try {
-    accountId = getOrCreateTelegramAccount(chatId, {
+    const identity = getOrCreateTelegramAccount(chatId, {
       username: user.username || null,
       firstName: user.first_name || null,
-    }).account_id;
+    });
+    if (identity && typeof identity.then === "function") {
+      return identity.then((resolved) => recordTrackedUser(chatId, user, eventType, metadata, resolved.account_id));
+    }
+    accountId = identity.account_id;
   } catch (error) {
     console.error("Account identity sync failed:", error.message);
   }
+  return recordTrackedUser(chatId, user, eventType, metadata, accountId);
+}
+
+function recordTrackedUser(chatId, user, eventType, metadata, accountId) {
   db.prepare(`
     INSERT INTO bot_users (chat_id, account_id, username, first_name, status, last_seen_at, blocked_at)
     VALUES (?, ?, ?, ?, 'active', CURRENT_TIMESTAMP, NULL)

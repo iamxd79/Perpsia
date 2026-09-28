@@ -268,6 +268,13 @@ function getLastAlert(symbol) {
 
 function saveRiskSettings(chatId, capital, riskPercent, maxLeverage) {
   const accountId = resolveAccountIdForChat(chatId);
+  if (accountId && typeof accountId.then === "function") {
+    return accountId.then((resolved) => saveRiskSettingsForAccount(chatId, resolved, capital, riskPercent, maxLeverage));
+  }
+  return saveRiskSettingsForAccount(chatId, accountId, capital, riskPercent, maxLeverage);
+}
+
+function saveRiskSettingsForAccount(chatId, accountId, capital, riskPercent, maxLeverage) {
   saveAccountRisk(accountId, capital, riskPercent, maxLeverage);
   return db
     .prepare(`
@@ -291,7 +298,13 @@ function saveRiskSettings(chatId, capital, riskPercent, maxLeverage) {
 
 
 function getRiskSettings(chatId) {
-  const accountRisk = getAccountRisk(resolveAccountIdForChat(chatId));
+  const accountId = resolveAccountIdForChat(chatId);
+  if (accountId && typeof accountId.then === "function") return accountId.then((resolved) => getRiskSettingsForAccount(chatId, resolved));
+  return getRiskSettingsForAccount(chatId, accountId);
+}
+
+function getRiskSettingsForAccount(chatId, accountId) {
+  const accountRisk = getAccountRisk(accountId);
   if (accountRisk) return { ...accountRisk, chat_id: String(chatId) };
   return db
     .prepare(`
@@ -318,14 +331,22 @@ function normalizeTrackedSymbol(symbol) {
 
 
 function getWatchlist(chatId) {
-  return getAccountWatchlist(resolveAccountIdForChat(chatId));
+  const accountId = resolveAccountIdForChat(chatId);
+  if (accountId && typeof accountId.then === "function") return accountId.then((resolved) => getAccountWatchlist(resolved));
+  return getAccountWatchlist(accountId);
 }
 
 
 function addToWatchlist(chatId, symbol) {
   const normalized = normalizeTrackedSymbol(symbol);
   if (!normalized) throw new Error("A valid asset symbol is required.");
-  addAccountWatchlist(resolveAccountIdForChat(chatId), normalized);
+  const accountId = resolveAccountIdForChat(chatId);
+  if (accountId && typeof accountId.then === "function") return accountId.then((resolved) => addToWatchlistForAccount(chatId, resolved, normalized));
+  return addToWatchlistForAccount(chatId, accountId, normalized);
+}
+
+function addToWatchlistForAccount(chatId, accountId, normalized) {
+  addAccountWatchlist(accountId, normalized);
   return db
     .prepare(`
       INSERT OR IGNORE INTO user_watchlist (chat_id, symbol)
@@ -338,7 +359,13 @@ function addToWatchlist(chatId, symbol) {
 function removeFromWatchlist(chatId, symbol) {
   const normalized = normalizeTrackedSymbol(symbol);
   if (!normalized) throw new Error("A valid asset symbol is required.");
-  removeAccountWatchlist(resolveAccountIdForChat(chatId), normalized);
+  const accountId = resolveAccountIdForChat(chatId);
+  if (accountId && typeof accountId.then === "function") return accountId.then((resolved) => removeFromWatchlistForAccount(chatId, resolved, normalized));
+  return removeFromWatchlistForAccount(chatId, accountId, normalized);
+}
+
+function removeFromWatchlistForAccount(chatId, accountId, normalized) {
+  removeAccountWatchlist(accountId, normalized);
   return db
     .prepare(`
       DELETE FROM user_watchlist
@@ -350,6 +377,11 @@ function removeFromWatchlist(chatId, symbol) {
 
 function getUserPreferences(chatId) {
   const accountId = resolveAccountIdForChat(chatId);
+  if (accountId && typeof accountId.then === "function") return accountId.then((resolved) => getUserPreferencesForAccount(chatId, resolved));
+  return getUserPreferencesForAccount(chatId, accountId);
+}
+
+function getUserPreferencesForAccount(chatId, accountId) {
   const preferences = getAccountPreferences(accountId);
   return { ...preferences, chat_id: String(chatId) };
 }
@@ -357,6 +389,11 @@ function getUserPreferences(chatId) {
 
 function saveUserPreferences(chatId, updates = {}) {
   const accountId = resolveAccountIdForChat(chatId);
+  if (accountId && typeof accountId.then === "function") return accountId.then((resolved) => saveUserPreferencesForAccount(chatId, resolved, updates));
+  return saveUserPreferencesForAccount(chatId, accountId, updates);
+}
+
+function saveUserPreferencesForAccount(chatId, accountId, updates = {}) {
   const current = getAccountPreferences(accountId);
   const preferredExchange = String(updates.preferred_exchange || updates.preferredExchange || current.preferred_exchange || "Binance");
   const alertFrequency = String(updates.alert_frequency || updates.alertFrequency || current.alert_frequency || "4h");

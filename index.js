@@ -134,9 +134,10 @@ const {
 } = require("./services/paperTrading");
 const { renderPaperClosedCard, renderPaperPnlCard } = require("./services/paperCard");
 const { getAdminStats, getAdminUsers, getLeaderboard, getUserStats, isAdmin, markUserStatus, trackUser } = require("./services/userAnalytics");
-const { createTelegramLinkSession } = require("./services/accountIdentity");
+const { createTelegramLinkSession, createWebTelegramLinkSession } = require("./services/accountIdentity");
 const {
   consumeTelegramLinkSession,
+  consumeWebTelegramLinkSession,
   getAccountIdentities,
   getOrCreateIdentity,
   inspectTelegramLinkSession,
@@ -151,6 +152,8 @@ const { getAsset } = require("./services/assetRegistry");
 const { getStakingState } = require("./services/staking");
 const { getAccountEntitlements } = require("./services/entitlements");
 const { getTokenHealth } = require("./services/tokenHealth");
+const { checkPostgres, isConfigured: isPostgresConfigured } = require("./services/postgres");
+const { isPostgresIdentityEnabled } = require("./services/accountIdentity");
 
 
 
@@ -590,12 +593,27 @@ async function handleHttpRequest(req, res) {
     }
 
     if (requestUrl.pathname === "/health") {
+      const postgresConfigured = isPostgresConfigured();
+      let postgresStatus = postgresConfigured ? "degraded" : "not_configured";
+      if (postgresConfigured) {
+        try {
+          await checkPostgres();
+          postgresStatus = "ok";
+        } catch {
+          postgresStatus = "degraded";
+        }
+      }
+      const identityStorage = {
+        mode: isPostgresIdentityEnabled() ? "postgresql" : "sqlite-local",
+        authoritative: isPostgresIdentityEnabled(),
+        status: isPostgresIdentityEnabled() ? postgresStatus : "ok",
+      };
       const providers = getProviderHealth();
       const streamHealth = getStreamManager().getHealth();
       const snapshots = getSnapshotHealth();
       const degraded = providers.some((item) => ["circuit_open", "offline", "degraded"].includes(String(item.status || "").toLowerCase())) ||
         streamHealth.some((item) => ["degraded", "stale"].includes(String(item.status || "").toLowerCase())) ||
-        Number(snapshots.stale || 0) > 0;
+        Number(snapshots.stale || 0) > 0 || identityStorage.status === "degraded";
       const noProviderAvailable = providers.length > 0 && providers.every((item) => ["circuit_open", "offline"].includes(String(item.status || "").toLowerCase()));
       res.writeHead(noProviderAvailable ? 503 : 200, {
         "Content-Type": "application/json; charset=utf-8",
@@ -606,6 +624,7 @@ async function handleHttpRequest(req, res) {
         service: "Perpsia Terminal",
         build: getBuildHealth(),
         storage: getStorageInfo(),
+        identity_storage: identityStorage,
         signal_quality: getSignalQualityHealth(),
         scheduler: getSchedulerHealth(),
         integrations: getIntegrationHealth(),
@@ -652,8 +671,9 @@ async function handleHttpRequest(req, res) {
         res.end(JSON.stringify({ error: "Invalid JSON payload" }));
         return;
       }
-      const result = inspectTelegramLinkSession(body?.token);
-      res.writeHead(result.status === "valid" ? 200 : 400, {
+      const result = await inspectTelegramLinkSession(body?.token);
+      const status = result.status === "valid" ? 200 : result.status === "expired" ? 410 : result.status === "used" ? 409 : 400;
+      res.writeHead(status, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store",
       });
@@ -678,7 +698,7 @@ async function handleHttpRequest(req, res) {
       }
       try {
         const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
-        const identity = consumeTelegramLinkSession(
+        const identity = await consumeTelegramLinkSession(
           body?.token,
           "privy",
           verified.user_id,
@@ -690,10 +710,44 @@ async function handleHttpRequest(req, res) {
         });
         res.end(JSON.stringify({ accountId: identity.account_id, provider: identity.provider }));
       } catch (error) {
-        const conflict = /already linked to another/i.test(error.message);
-        const status = error.code === "PRIVY_NOT_CONFIGURED" ? 503 : conflict ? 409 : 401;
+        const conflict = error.code === "IDENTITY_CONFLICT";
+        const status = error.code === "PRIVY_NOT_CONFIGURED" ? 503
+          : conflict ? 409
+          : error.code === "LINK_EXPIRED" ? 410
+          : error.code === "LINK_USED" ? 409
+          : error.code === "LINK_INVALID" ? 400
+          : 401;
         res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
-        res.end(JSON.stringify({ error: conflict ? "account_conflict" : error.message }));
+        res.end(JSON.stringify({ error: conflict ? "account_conflict" : error.code || "link_failed", message: error.message }));
+      }
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/account/telegram-link/start") {
+      if (req.method !== "POST") {
+        res.writeHead(405, { "Content-Type": "application/json; charset=utf-8", Allow: "POST" });
+        res.end(JSON.stringify({ error: "Method not allowed" }));
+        return;
+      }
+      if (!authorizeInternalRequest(req, res)) return;
+      let body;
+      try {
+        body = JSON.parse(await readRequestBody(req, 32 * 1024));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: "Invalid JSON payload" }));
+        return;
+      }
+      try {
+        const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
+        const identity = await getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
+        const session = await createWebTelegramLinkSession(identity.account_id);
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ accountId: identity.account_id, expiresAt: session.expiresAt, telegramUrl: session.telegramUrl }));
+      } catch (error) {
+        const status = error.code === "PRIVY_NOT_CONFIGURED" ? 503 : error.code === "INVALID_PRIVY_TOKEN" ? 401 : 400;
+        res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: error.code || "telegram_link_failed", message: error.message }));
       }
       return;
     }
@@ -715,8 +769,8 @@ async function handleHttpRequest(req, res) {
       }
       try {
         const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
-        const identity = getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
-        const identities = getAccountIdentities(identity.account_id).map((item) => ({
+        const identity = await getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
+        const identities = (await getAccountIdentities(identity.account_id)).map((item) => ({
           provider: item.provider,
           createdAt: item.created_at,
           lastSeenAt: item.last_seen_at,
@@ -749,8 +803,8 @@ async function handleHttpRequest(req, res) {
       }
       try {
         const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
-        const identity = getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
-        const overview = getAccountOverview(identity.account_id);
+        const identity = await getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
+        const overview = await getAccountOverview(identity.account_id);
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
         res.end(JSON.stringify({ ...overview, wallets: getUserWallets(identity.account_id) }));
       } catch (error) {
@@ -776,7 +830,7 @@ async function handleHttpRequest(req, res) {
       }
       try {
         const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
-        const identity = getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
+        const identity = await getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
         let result;
         if (body?.action === "link") {
           const requested = body.wallet && typeof body.wallet === "object" ? body.wallet : {};
@@ -827,7 +881,7 @@ async function handleHttpRequest(req, res) {
       }
       try {
         const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
-        const identity = getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
+        const identity = await getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
         const asset = getAsset("PERPSIA");
         const [balance, staking] = await Promise.all([getAccountBalance(identity.account_id, asset), Promise.resolve(getStakingState(identity.account_id, asset.symbol))]);
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -855,7 +909,7 @@ async function handleHttpRequest(req, res) {
       }
       try {
         const verified = await verifyPrivyAccessToken(body?.privyAccessToken);
-        const identity = getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
+        const identity = await getOrCreateIdentity("privy", verified.user_id, { sessionId: verified.session_id });
         if (requestUrl.pathname.endsWith("/preferences")) {
           saveAccountPreferences(identity.account_id, body.preferences || {});
         } else {
@@ -864,7 +918,7 @@ async function handleHttpRequest(req, res) {
           saveAccountRisk(identity.account_id, ...values);
         }
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
-        res.end(JSON.stringify(getAccountOverview(identity.account_id)));
+        res.end(JSON.stringify(await getAccountOverview(identity.account_id)));
       } catch (error) {
         const status = error.code === "PRIVY_NOT_CONFIGURED" ? 503 : error.code === "INVALID_PRIVY_TOKEN" ? 401 : 400;
         res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -2746,6 +2800,30 @@ function getHelpMessage() {
 
 
 
+bot.onText(/^\/start(?:@\w+)?\s+link_([A-Za-z0-9_-]+)$/i, async (msg, match) => {
+  try {
+    const identity = await consumeWebTelegramLinkSession(match[1], msg.chat.id, {
+      username: msg.from?.username || null,
+      firstName: msg.from?.first_name || null,
+    });
+    return bot.sendMessage(msg.chat.id, [
+      "PERPSIA ACCOUNT CONNECTED",
+      "",
+      "Your Telegram and web identities now use the same PerpsIA account.",
+      "Account: " + identity.account_id,
+    ].join("\n"));
+  } catch (error) {
+    const message = error.code === "IDENTITY_CONFLICT"
+      ? "This Telegram account is already connected to another PerpsIA account. No accounts were merged."
+      : error.code === "LINK_EXPIRED"
+        ? "This connection link expired. Start a new link from your PerpsIA dashboard."
+        : error.code === "LINK_USED"
+          ? "This connection link was already used."
+          : "This connection link is invalid. Start a new link from your PerpsIA dashboard.";
+    return bot.sendMessage(msg.chat.id, "PERPSIA ACCOUNT\n\n" + message);
+  }
+});
+
 bot.onText(/^\/start(?:@\w+)?$/i, async (msg) => {
   await bot.sendMessage(
     msg.chat.id,
@@ -2897,7 +2975,7 @@ async function handlePaperRequest(chatId, request) {
     ].join("\n"));
   }
   if (request.action === "close") {
-    const positions = getPaperOpenPositions(chatId);
+    const positions = await getPaperOpenPositions(chatId);
     const position = request.symbol ? positions.find((item) => item.symbol === request.symbol) : positions[0];
     if (!position) return bot.sendMessage(chatId, "No matching open paper position.");
     const refreshed = await refreshPaperPositions(chatId);
@@ -2905,8 +2983,8 @@ async function handlePaperRequest(chatId, request) {
     const closed = closePaperPosition(current.id, current.mark_price, "MANUAL");
     return sendPaperClosedCard(chatId, closed);
   }
-}function preferredVenue(chatId, fallback = "Binance") {
-  const requested = getUserPreferences(chatId)?.preferred_exchange || fallback;
+}async function preferredVenue(chatId, fallback = "Binance") {
+  const requested = (await getUserPreferences(chatId))?.preferred_exchange || fallback;
   try {
     return normalizeVenue(requested);
   } catch {
@@ -2950,7 +3028,7 @@ function signalReplyMarkup(signal, options = {}) {
 
 
 async function showRiskProfile(chatId) {
-  return bot.sendMessage(chatId, formatRiskProfile(getRiskSettings(chatId)));
+  return bot.sendMessage(chatId, formatRiskProfile(await getRiskSettings(chatId)));
 }
 
 
@@ -2959,31 +3037,31 @@ async function updateRiskProfile(chatId, capital, riskPercent, maxLeverage) {
   if (values.some((value) => !Number.isFinite(value) || value <= 0)) {
     return bot.sendMessage(chatId, "RISK PROFILE\n\nUse /risk 500 1 5\n\nCapital $500 · Risk 1% · Max leverage 5x");
   }
-  saveRiskSettings(chatId, values[0], values[1], values[2]);
+  await saveRiskSettings(chatId, values[0], values[1], values[2]);
   return showRiskProfile(chatId);
 }
 
 
 async function showWatchlist(chatId, messageId = null) {
-  const entries = getWatchlist(chatId);
+  const entries = await getWatchlist(chatId);
   const text = formatWatchlist(entries);
-  const options = { reply_markup: watchlistKeyboard(entries, preferredVenue(chatId)) };
+  const options = { reply_markup: watchlistKeyboard(entries, await preferredVenue(chatId)) };
   if (messageId) return safeEditMessage(chatId, messageId, text, options);
   return bot.sendMessage(chatId, text, options);
 }
 
 
 async function changeWatchlist(chatId, action, symbol, messageId = null) {
-  if (action === "add") addToWatchlist(chatId, symbol);
-  else removeFromWatchlist(chatId, symbol);
+  if (action === "add") await addToWatchlist(chatId, symbol);
+  else await removeFromWatchlist(chatId, symbol);
   return showWatchlist(chatId, messageId);
 }
 
 
 async function showSettings(chatId, messageId = null) {
-  const preferences = getUserPreferences(chatId);
-  const entries = getWatchlist(chatId);
-  const text = formatSettings(preferences, entries.length, getRiskSettings(chatId));
+  const preferences = await getUserPreferences(chatId);
+  const entries = await getWatchlist(chatId);
+  const text = formatSettings(preferences, entries.length, await getRiskSettings(chatId));
   const options = { reply_markup: settingsKeyboard() };
   if (messageId) return safeEditMessage(chatId, messageId, text, options);
   return bot.sendMessage(chatId, text, options);
@@ -3041,7 +3119,7 @@ async function runComparison(chatId, leftSymbol, rightSymbol, venue = "Binance")
   const left = String(leftSymbol || "").replace(/^\$/, "").toUpperCase();
   const right = String(rightSymbol || "").replace(/^\$/, "").toUpperCase();
   if (!left || !right) return bot.sendMessage(chatId, "Use /compare SOL ETH");
-  venue = normalizeVenue(venue || preferredVenue(chatId));
+  venue = normalizeVenue(venue || await preferredVenue(chatId));
   const loading = await bot.sendMessage(chatId, formatProgress({ kind: "analysis", symbol: left + " vs " + right, venue, percent: 5 }));
 
   try {
@@ -3313,7 +3391,7 @@ Maximum leverage: 5x`
 
 
 
-    saveRiskSettings(
+    await saveRiskSettings(
       chatId,
       capital,
       riskPercent,
@@ -3518,7 +3596,7 @@ async function runManualScan(chatId, venue = "Binance") {
 
 
 async function runAlphaScan(chatId) {
-  const venue = preferredVenue(chatId, "Binance");
+  const venue = await preferredVenue(chatId, "Binance");
   if (!lockScan()) {
     return bot.sendMessage(chatId, "PERPSIA SCAN IN PROGRESS\n\nAnother market scan is already running. Please wait for it to finish.");
   }
@@ -3606,7 +3684,7 @@ async function runAlphaScan(chatId) {
 
 
 bot.onText(/^\/scan(?:@\w+)?(?:\s+([A-Za-z]+))?$/i, async (msg, match) => {
-  const venue = match[1] || preferredVenue(msg.chat.id);
+      const venue = match[1] || await preferredVenue(msg.chat.id);
 
 
 
@@ -4185,7 +4263,7 @@ Please wait for it to finish.`
 
 
     const riskSettings =
-      getRiskSettings(chatId);
+      await getRiskSettings(chatId);
 
 
 
@@ -4247,7 +4325,7 @@ Please wait for it to finish.`
 
 
     saveAssetState(result);
-    recordAccountAnalysis(chatId, {
+    await recordAccountAnalysis(chatId, {
       symbol,
       venue,
       analysisType: options.mode === "alpha" ? "early_alpha" : "asset_analysis",
@@ -4745,7 +4823,7 @@ bot.onText(
 
 
     const venue =
-      match[2] || preferredVenue(chatId);
+      match[2] || await preferredVenue(chatId);
 
 
 
@@ -4773,7 +4851,7 @@ bot.onText(
 
 bot.onText(/^\/alpha(?:@\w+)?(?:\s+\$?([A-Za-z0-9]+))?$/i, async (msg, match) => {
   if (!match[1]) return runAlphaScan(msg.chat.id);
-  return runAssetAnalysis(msg.chat.id, match[1], preferredVenue(msg.chat.id), {
+  return runAssetAnalysis(msg.chat.id, match[1], await preferredVenue(msg.chat.id), {
     mode: "alpha",
     scanOptions: { isNewToken: true, cexAvailable: true },
   });
@@ -4794,7 +4872,7 @@ bot.on("my_chat_member", (update) => {
 
 bot.onText(/^\/account(?:@\w+)?$/i, async (msg) => {
   try {
-    const session = createTelegramLinkSession(msg.chat.id, {
+    const session = await createTelegramLinkSession(msg.chat.id, {
       metadata: {
         username: msg.from?.username || null,
         firstName: msg.from?.first_name || null,
@@ -4865,7 +4943,7 @@ bot.onText(/^\/history(?:@\w+)?(?:\s+\$?([A-Za-z0-9]+))?$/i, async (msg, match) 
 
 
 bot.onText(/^\/compare(?:@\w+)?(?:\s+\$?([A-Za-z0-9]+)\s+\$?([A-Za-z0-9]+))?$/i, async (msg, match) => {
-  return runComparison(msg.chat.id, match[1], match[2], preferredVenue(msg.chat.id));
+  return runComparison(msg.chat.id, match[1], match[2], await preferredVenue(msg.chat.id));
 });
 
 
@@ -4920,7 +4998,7 @@ bot.onText(/^\/about(?:@\w+)?$/i, async (msg) => {
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text?.trim();
-  trackUser(msg, text?.startsWith("/start") ? "start" : "message");
+  await Promise.resolve(trackUser(msg, text?.startsWith("/start") ? "start" : "message"));
 
 
 
@@ -5020,7 +5098,7 @@ bot.on("message", async (msg) => {
 
 
     if (!DIRECT_TEXT_WORDS.has(symbol)) {
-      return runAssetAnalysis(chatId, symbol, preferredVenue(chatId));
+      return runAssetAnalysis(chatId, symbol, await preferredVenue(chatId));
     }
   }
 
@@ -5212,7 +5290,7 @@ Check Perpsia status`
       return runAssetAnalysis(
         chatId,
         String(route.symbol).replace(/^\$/, "").toUpperCase(),
-        route.venue || preferredVenue(chatId)
+        route.venue || await preferredVenue(chatId)
       );
     }
 
@@ -5232,12 +5310,12 @@ Check Perpsia status`
 
 
     if (route.intent === "scan_market") {
-      return runManualScan(chatId, route.venue || preferredVenue(chatId));
+      return runManualScan(chatId, route.venue || await preferredVenue(chatId));
     }
 
     if (route.intent === "alpha") {
       if (route.symbol) {
-        return runAssetAnalysis(chatId, route.symbol, preferredVenue(chatId), {
+        return runAssetAnalysis(chatId, route.symbol, await preferredVenue(chatId), {
           mode: "alpha",
           scanOptions: { isNewToken: true, cexAvailable: true },
         });
@@ -5246,7 +5324,7 @@ Check Perpsia status`
     }
 
     if (route.intent === "compare_assets") {
-      return runComparison(chatId, route.symbols?.[0], route.symbols?.[1], preferredVenue(chatId));
+        return runComparison(chatId, route.symbols?.[0], route.symbols?.[1], await preferredVenue(chatId));
     }
 
     if (route.intent === "watchlist_add") return changeWatchlist(chatId, "add", route.symbol);
@@ -5274,7 +5352,7 @@ Check Perpsia status`
     if (route.intent === "set_risk") {
       const capital = Number(route.capital);
       const riskPercent = Number(route.riskPercent);
-      const savedRisk = getRiskSettings(chatId);
+      const savedRisk = await getRiskSettings(chatId);
       const maxLeverage = Number(route.maxLeverage ?? savedRisk?.max_leverage);
 
 
@@ -5324,7 +5402,7 @@ I have $500, risk 1%, max leverage 5x`
 
 
 
-      saveRiskSettings(chatId, capital, riskPercent, maxLeverage);
+      await saveRiskSettings(chatId, capital, riskPercent, maxLeverage);
 
 
 
@@ -5504,7 +5582,7 @@ bot.on("callback_query", async (query) => {
   try {
     if (action.startsWith("paper_refresh:")) {
       const positionId = Number(action.slice("paper_refresh:".length));
-      const owned = getPaperOpenPositions(chatId).find((position) => position.id === positionId);
+      const owned = (await getPaperOpenPositions(chatId)).find((position) => position.id === positionId);
       if (!owned) return bot.sendMessage(chatId, "This paper position is no longer open.");
       const result = await refreshPaperPositions(chatId);
       const updated = result.updated.find((position) => position.id === positionId);
@@ -5515,7 +5593,7 @@ bot.on("callback_query", async (query) => {
 
     if (action.startsWith("paper_close:")) {
       const positionId = Number(action.slice("paper_close:".length));
-      const owned = getPaperOpenPositions(chatId).find((position) => position.id === positionId);
+      const owned = (await getPaperOpenPositions(chatId)).find((position) => position.id === positionId);
       if (!owned) return bot.sendMessage(chatId, "This paper position is already closed.");
       const result = await refreshPaperPositions(chatId);
       const current = result.updated.find((position) => position.id === positionId) || owned;
@@ -5523,7 +5601,7 @@ bot.on("callback_query", async (query) => {
       return sendPaperClosedCard(chatId, closed);
     }
     if (action === "scan_market") {
-      return runManualScan(chatId, preferredVenue(chatId));
+      return runManualScan(chatId, await preferredVenue(chatId));
     }
 
     if (action === "early_alpha" || action === "alpha_again") {
@@ -5558,12 +5636,12 @@ bot.on("callback_query", async (query) => {
     }
 
     if (action.startsWith("scan_again:")) {
-      return runManualScan(chatId, action.slice("scan_again:".length) || preferredVenue(chatId));
+      return runManualScan(chatId, action.slice("scan_again:".length) || await preferredVenue(chatId));
     }
 
     if (action.startsWith("analyze:")) {
       const [, symbol, venue] = action.split(":");
-      if (symbol) return runAssetAnalysis(chatId, symbol, venue || preferredVenue(chatId));
+      if (symbol) return runAssetAnalysis(chatId, symbol, venue || await preferredVenue(chatId));
     }
 
     if (action.startsWith("track:")) {
@@ -5577,21 +5655,21 @@ bot.on("callback_query", async (query) => {
 
     if (action.startsWith("settings_venue:")) {
       const venue = normalizeVenue(action.slice("settings_venue:".length));
-      saveUserPreferences(chatId, { preferred_exchange: venue });
+      await saveUserPreferences(chatId, { preferred_exchange: venue });
       return showSettings(chatId, messageId);
     }
 
     if (action.startsWith("settings_frequency:")) {
       const frequency = action.slice("settings_frequency:".length);
       if (!["1h", "4h", "12h"].includes(frequency)) throw new Error("Unsupported alert frequency");
-      saveUserPreferences(chatId, { alert_frequency: frequency });
+      await saveUserPreferences(chatId, { alert_frequency: frequency });
       return showSettings(chatId, messageId);
     }
 
     if (action.startsWith("settings_sensitivity:")) {
       const sensitivity = action.slice("settings_sensitivity:".length);
       if (!["conservative", "balanced", "aggressive"].includes(sensitivity)) throw new Error("Unsupported signal sensitivity");
-      saveUserPreferences(chatId, { signal_sensitivity: sensitivity });
+      await saveUserPreferences(chatId, { signal_sensitivity: sensitivity });
       return showSettings(chatId, messageId);
     }
 
